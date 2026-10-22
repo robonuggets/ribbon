@@ -41,15 +41,18 @@ export const kindOf = (columns: number): Kind => (columns >= WIDE_AT ? 'wide' : 
 export const bandPx = (columns: number): number => (columns + 5) * 12
 
 // $ per million tokens: input, and the cache read. The 1-hour cache write is 2 times
-// input. Haiku 5.5 is $0.10 up to 100K tokens and $0.50 above; long sessions use the
-// higher rate.
-export type Model = { id: string; NAME: string; input: number; read: number }
+// input. Haiku 5.5 is $0.10 up to 100K tokens and $0.50 above, so it carries a `short`
+// rate for prompts up to that size.
+type Rate = { input: number; read: number }
+export type Model = Rate & { id: string; NAME: string; short?: Rate & { upTo: number } }
 export const MODELS: Model[] = [
   { id: 'fable', NAME: 'FABLE', input: 10, read: 0.25 },
   { id: 'opus', NAME: 'OPUS', input: 4, read: 0.2 },
-  { id: 'sonnet', NAME: 'SONNET', input: 2, read: 0.2 },
-  { id: 'haiku', NAME: 'HAIKU', input: 0.5, read: 0.05 },
+  { id: 'sonnet', NAME: 'SONNET', input: 2, read: 0.1 },
+  { id: 'haiku', NAME: 'HAIKU', input: 0.5, read: 0.05, short: { upTo: 100_000, input: 0.1, read: 0.01 } },
 ]
+
+const rateOf = (m: Model, tokens: number): Rate => (m.short && tokens <= m.short.upTo ? m.short : m)
 
 /** Which row of MODELS a model id belongs to, or null for one the card doesn't price. */
 export const familyOf = (model: string | null | undefined): string | null => {
@@ -57,8 +60,8 @@ export const familyOf = (model: string | null | undefined): string | null => {
   return MODELS.find(x => m.includes(x.id))?.id ?? null
 }
 
-export const coldCost = (m: Model, tokens: number): number => (tokens / 1e6) * m.input * 2
-export const warmCost = (m: Model, tokens: number): number => (tokens / 1e6) * m.read
+export const coldCost = (m: Model, tokens: number): number => (tokens / 1e6) * rateOf(m, tokens).input * 2
+export const warmCost = (m: Model, tokens: number): number => (tokens / 1e6) * rateOf(m, tokens).read
 export const costOf = (m: Model, mode: Mode, tokens: number): number => (mode === 'cold' ? coldCost(m, tokens) : warmCost(m, tokens))
 export const usd = (n: number): string => '$' + n.toFixed(2)
 export const tok = (n: number): string => (n >= 1e6 ? `${Number((n / 1e6).toFixed(1))}M` : `${Math.round(n / 1000)}k`)
