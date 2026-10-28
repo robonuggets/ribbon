@@ -7,5 +7,14 @@
   "repository": "https://github.com/robonuggets/ribbon",
   "license": "MIT",
   "keywords": ["usage", "rate-limit", "prompt-cache", "cost", "status", "mod", "claude-code"],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "agentsView": {
+      "type": "string",
+      "title": "Agents view",
+      "description": "on adds a ⇄ button that swaps the band for a subagents progress bar, with a live agents panel (/agents-info)",
+      "default": "off",
+      "options": ["off", "on"]
+    }
+  }
 }

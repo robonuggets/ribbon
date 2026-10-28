@@ -58,9 +58,9 @@ In a Claude Code terminal session, type:
 ### Usage left
 
 - **7D** (orange) is your 7-day window. **5H** (yellow) is your 5-hour window.
-- Each dot bar shows what is **left**, not what is used.
-- Under each one is when it resets, for example `resets 3d 9h`.
-- If a window drops under 15%, a bold **LOW** shows next to it.
+- Each bar shows what is **left**, not what is used: ten steps, one per 10%, with the percent beside it.
+- Next to it is when the window resets, for example `3d9h`.
+- If a window drops under 15%, its percent turns into a red badge.
 
 ### The prompt cache
 
@@ -69,22 +69,36 @@ After your first reply, the band also tracks the prompt cache. The cache keeps y
 - **WARM** (red, the robot bobs): the cache is live. It shows the minutes left and what your next message costs.
 - **COLD** (blue, the robot is frozen): the hour has passed. Your next message re-sends the whole chat, so it costs more. It shows the price first.
 
-Click **Show** to open the cache card, and **Hide** to fold it. Warm starts folded. Cold starts open, so you see the price before you send.
+Click **▾** at the right end to open the cache card, and **▴** to fold it. Warm starts folded. Cold starts open, so you see the price before you send.
 
 The card shows how long you've been idle, how many tokens are in the cache, and what the next message costs on each model. Your model is marked **YOU**. See [Up close](#up-close) below.
 
 ### Fits any width
 
-- **Wide:** everything on one row.
-- **Half width:** each window stacks into a small block.
-- **Narrow:** the cache moves to its own row.
+The band always stays on one row, with its groups spread evenly across it and a small dot between them. Room left over goes to the bars, up to 180 px each. When there is room it reads `74% left` and the button says **Show**. When the window gets narrower it switches to a compact form (`74%`, a one-character **▾**) and then drops pieces, in this order: the robot, the idle time (the price stays), the reset times, the drawn chip, the bars, then the cache minutes. The percent of each window, the WARM / COLD word and the fold button always stay.
+
 - **Terminal:** the same facts as plain text.
+
+### Agents view (optional)
+
+Off by default. Turn it on with the `agentsView` option in `/config` (Plugins → ribbon), or in `~/.claude/settings.json`:
+
+```json
+{ "pluginConfigs": { "ribbon@robonuggets": { "options": { "agentsView": "on" } } } }
+```
+
+A **⇄ Agents** button then sits just before the fold button. It swaps the whole row for a progress bar of the subagents you've launched: how many of the current wave are done, with a crab that walks while any of them is still working. **⇄ Usage** brings the usage row back, and the band remembers your choice for the next session.
+
+In that view, **×N** opens a live panel beside the chat (so does `/agents-info`). Each subagent gets a row: its model, how full its context is, tokens, an estimated cost and how long it has run. Finished ones fold into their own section, and **Collapse** shrinks the panel to a strip of crabs. The panel only opens when you ask for it.
+
+The bar and panel are adapted from [savvy-progress](https://github.com/johnnyvizz/claude-kit/tree/main/plugins/savvy-progress) by johnnyvizz (MIT). Only the drawing and the subagent tracking come over. Its plan-reporting tools need the savvy-flow skill, so they're left out.
 
 ## Good to know
 
 - **It costs nothing to run.** It reads the app's own numbers and draws them. It never calls a model.
 - **Prices are estimates.** They come from a price table in `hooks/cache-art.ts` (`MODELS`), not from your bill. If prices change, edit that table.
 - **Subagents don't count.** Only your main chat resets the cache clock.
+- **Agent costs are estimates too.** The agents panel prices tokens with its own table (`PRICES` in `hooks/savvy-pane-art.ts`).
 
 ## What is inside
 
@@ -97,9 +111,11 @@ ribbon/
 │   ├── hooks.json          points to the module
 │   ├── register.tsx        the band: usage, cache tracking, layout
 │   ├── cache-art.ts        the cache card and robot drawings, the price table
+│   ├── savvy-art.ts        the agents view's progress bar (optional)
+│   ├── savvy-pane-art.ts   the agents panel's rows and its price table (optional)
 │   └── font.ts             Outfit, embedded so the drawings render anywhere
 ├── types/index.d.ts        the shape of what the band remembers
-├── tests/                  7 tests: layouts, warm and cold, terminal, cleared sessions
+├── tests/                  11 tests: layouts, warm and cold, terminal, cleared sessions, agents view
 └── assets/                 banner, screenshots, hex icon
 ```
 
@@ -125,7 +141,7 @@ claude plugin test ./ribbon
 
 ## Up close
 
-Click **Show** and the band opens into the cache card.
+Click **▾** and the band opens into the cache card.
 
 **Warm.** The cache is live. Your next message is cheap.
 
@@ -142,6 +158,8 @@ Click **Show** and the band opens into the cache card.
 ## License
 
 [MIT](LICENSE).
+
+The optional agents view adapts drawing code from [savvy-progress](https://github.com/johnnyvizz/claude-kit/tree/main/plugins/savvy-progress), Copyright (c) 2026 johnnyvizz, also MIT. Its notice is kept at the top of `hooks/savvy-art.ts` and `hooks/savvy-pane-art.ts`.
 
 The embedded font is [Outfit](https://github.com/Outfitio/Outfit-Fonts), under the SIL Open Font License 1.1.
 

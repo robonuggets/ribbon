@@ -1,12 +1,19 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { CacheFacts, Fold, Window } from '../types'
+import type { AgentRun, AgentsPanel, CacheFacts, Fold, ViewMode, Window } from '../types'
 import {
   BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
-  bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
+  cardSvg, chipSvg, costOf, familyOf, fmtIdle, mineModel, roboSvg, svgDoc, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
+import { ROW_H, crewLabel, crewPercent, crewRowSvg } from './savvy-art'
+import type { CrewView } from './savvy-art'
+import {
+  COMPACT_H, HEADER_H, LINE_H, ROW_H as AGENT_ROW_H, STATUS_GLYPH,
+  agentSvg, colorOf, compactSvg, ctxBar, ctxOf, elapsed, fmtCost, fmtTime, fmtTokens, gridSvg, gridTiles,
+  headerSvg, modelName, runCost, runModel, tierOf as tierOfType, totals, windowOf,
+} from './savvy-pane-art'
 
 // A band above the prompt in a warm dark look: card surface, cream text,
 // dot-matrix bars. Shows how much of each usage window is LEFT, 7-day first, then
@@ -17,16 +24,42 @@ import type { CacheView } from './cache-art'
 // next message costs to re-cache. Hide / Show folds the card; warm starts folded,
 // cold starts open, and a choice holds until the cache flips. Zero token cost:
 // it reads the engine's own figures and draws.
+//
+// With the `agentsView` option on, a ⇄ button swaps the row for a progress bar
+// of the session's subagents, and ×N opens a live panel of them (/agents-info
+// too). Both are adapted from savvy-progress by johnnyvizz (MIT).
 
-const CELLS = 10
 const LOW_AT = 15
-const TIGHT_CELLS = 6
 /** How often the band redraws, so the countdown and the warm-to-cold flip stay current. */
 const TICK_MS = 30_000
 
 const windows = atom({ plugin: 'ribbon', key: 'windows' } as const, [] as Window[])
 const cache = atom({ plugin: 'ribbon', key: 'cache' } as const, null as CacheFacts | null)
 const fold = atom({ plugin: 'ribbon', key: 'fold' } as const, null as Fold | null)
+// The ⇄ button swaps the whole row for savvy-progress's agents bar. The choice is
+// kept in $.store too, so the next session opens on the same view.
+const viewMode = atom({ plugin: 'ribbon', key: 'mode' } as const, 'usage' as ViewMode)
+// Every subagent of the session, as savvy-progress tracks them: the band counts
+// the latest wave, the agents pane lists them all.
+const agents = atom({ plugin: 'ribbon', key: 'agents' } as const, [] as AgentRun[])
+const panel = atom({ plugin: 'ribbon', key: 'panel' } as const, { isCompact: false, isDoneCollapsed: false } as AgentsPanel)
+/** The pane's clock, ticked each second while a subagent runs. */
+const paneNow = atom({ plugin: 'ribbon', key: 'now' } as const, 0)
+const MODE_KEY = 'mode'
+const PANE = 'ribbon-agents'
+
+const crewViewOf = (all: readonly AgentRun[]): CrewView => {
+  const wave = Math.max(0, ...all.map(a => a.wave))
+  const list = all.filter(a => a.wave === wave)
+  const running = list.filter(r => r.status === 'running')
+  return {
+    // One subagent at work names the row; otherwise the generic title.
+    title: running.length === 1 ? running[0]!.description || 'Subagent' : 'Subagents',
+    done: list.filter(r => r.status !== 'running').length,
+    running: running.length,
+    total: list.length,
+  }
+}
 
 const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H', spend_limit: 'SPEND' }
 const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1 }
@@ -37,21 +70,107 @@ const clean = (list: readonly Window[]): Window[] =>
     .map(w => ({ kind: w.kind, percentUsed: w.percentUsed, resetsAt: w.resetsAt }))
     .sort((a, b) => (ORDER[a.kind] ?? 9) - (ORDER[b.kind] ?? 9))
 
-const dots = (left: number, cells: number): { on: string; off: string } => {
-  const n = Math.max(0, Math.min(cells, Math.round((left / 100) * cells)))
-  return { on: '●'.repeat(n), off: '·'.repeat(cells - n) }
-}
+// One row at every width: when room runs out the band drops pieces in a fixed
+// order instead of stacking (Robo, the cold idle time, the reset times, the SVG
+// chip, the bars, the cache tail). Never dropped: each window's percent, the
+// WARM / COLD word, the fold button.
+/** CSS px on desktop, measured on captures: text ~7.5 a character. */
+const DRAWN_PX = { char: 7.5, gap: 17, pad: 20, button: 34, wordButton: 64, sep: 16, swap: 34, wordSwap: 84 }
+/** The terminal is a grid of 12 px columns. */
+const GRID_PX = { char: 12, gap: 24, pad: 24, button: 0, wordButton: 0, sep: 0, swap: 0, wordSwap: 0 }
+/** Desktop counts the band's columns in the code font's advance, ~8.65 px. */
+const DRAWN_COLUMN_PX = 8.65
+/** The widest a stretched bar gets; past this the free room stays as spacing. */
+const BAR_MAX = 180
+/** Better to drop a piece a little early than to clip the right edge. */
+const SAFETY = 1.08
+/** Dots per bar in the terminal, where the bar is text. */
+const TERM_CELLS = 5
+const BAR_H = 10
 
-const fmtReset = (iso: string | undefined, now: number): string => {
+// The first tier is the roomy one: "left" after each figure, longer bars and a
+// Show / Hide button in words. The rest are the compact steps down.
+type Tier = { robo: boolean; idle: boolean; resets: boolean; svgChip: boolean; bar: number; tail: boolean; words?: boolean }
+const TIERS: Tier[] = [
+  { robo: true, idle: true, resets: true, svgChip: true, bar: 130, tail: true, words: true },
+  { robo: true, idle: true, resets: true, svgChip: true, bar: 112, tail: true },
+  { robo: false, idle: false, resets: true, svgChip: true, bar: 112, tail: true },
+  { robo: false, idle: false, resets: false, svgChip: true, bar: 112, tail: true },
+  { robo: false, idle: false, resets: false, svgChip: false, bar: 52, tail: true },
+  { robo: false, idle: false, resets: false, svgChip: false, bar: 0, tail: true },
+  { robo: false, idle: false, resets: false, svgChip: false, bar: 0, tail: false },
+]
+
+const leftOf = (w: Window): number => Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
+
+/** Reset time without inner spaces: 1d18h, 4h50m, 2h, 50m, now. */
+const fmtShort = (iso: string | undefined, now: number): string => {
   if (!iso) return ''
   const ms = Date.parse(iso) - now
   if (Number.isNaN(ms)) return ''
-  if (ms <= 0) return 'resetting'
+  if (ms <= 0) return 'now'
   const mins = Math.round(ms / 60000)
   if (mins < 60) return `${mins}m`
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ${mins % 60}m`
-  return `${Math.floor(hours / 24)}d ${hours % 24}h`
+  if (hours < 24) return mins % 60 ? `${hours}h${mins % 60}m` : `${hours}h`
+  return `${Math.floor(hours / 24)}d${hours % 24}h`
+}
+
+/** The cache's words after the chip, for a tier: warm minutes, or cold idle and price. */
+const tailOf = (v: CacheView, t: Tier): string => {
+  if (!t.tail) return ''
+  if (v.mode === 'warm') return ` ${Math.max(0, TTL_MIN - v.idleMin)}m${t.words ? ' left' : ''}`
+  const mine = mineModel(v)
+  const price = mine ? usd(costOf(mine, v.mode, v.tokens)) : ''
+  return price ? (t.idle ? ` ${v.idle} ${price}` : ` ${price}`) : ` ${v.idle}`
+}
+
+/** The first tier whose one row fits the band, and the room it leaves over (px). */
+const tierOf = (columns: number, list: readonly Window[], view: CacheView | null, drawn: boolean, now: number, swap: boolean): { tier: Tier; spare: number } => {
+  const m = drawn ? DRAWN_PX : GRID_PX
+  const room = columns * (drawn ? DRAWN_COLUMN_PX : 12)
+  const text = (t: string) => t.length * m.char
+  for (const t of TIERS) {
+    const bar = t.bar === 0 ? 0 : drawn ? t.bar : TERM_CELLS * m.char
+    const wins = list.reduce((n, w) => {
+      const reset = t.resets ? fmtShort(w.resetsAt, now) : ''
+      return n + text(`${NAMES[w.kind] ?? w.kind} `) + bar + text(` ${leftOf(w)}%${t.words ? ' left' : ''}`) + (reset ? text(` ${reset}`) : 0) + m.gap
+    }, 0)
+    const cache = !view ? 0
+      : (drawn && t.robo ? ROBO_SIZE + 6 : 0) +
+        (drawn && t.svgChip ? chipSvg(view.mode).w : text(` ${WORD[view.mode]} `)) +
+        text(tailOf(view, t)) + m.gap
+    const seps = (list.length + (view ? 1 : 0) - 1) * m.sep
+    const need = m.pad + wins + cache + seps + (view ? (t.words ? m.wordButton : m.button) : 0) + (swap ? (t.words ? m.wordSwap : m.swap) : 0)
+    if (need * SAFETY <= room) return { tier: t, spare: room - need * SAFETY }
+  }
+  return { tier: TIERS[TIERS.length - 1]!, spare: 0 }
+}
+
+/**
+ * A stepped gauge: ten segments (five on narrow tiers), one per 10% (or 20%), so
+ * the eye can count what is left. A step that is only partly left lights up
+ * dimmer, in proportion, rather than as a thin sliver.
+ */
+const barSvg = (left: number, color: string, w: number): string => {
+  const n = w >= 80 ? 10 : 5
+  const gap = 3
+  const seg = (w - (n - 1) * gap) / n
+  const lit = (Math.max(0, Math.min(100, left)) / 100) * n
+  let body = ''
+  for (let i = 0; i < n; i++) {
+    const x = +(i * (seg + gap)).toFixed(2)
+    const part = Math.max(0, Math.min(1, lit - i))
+    body += `<rect x="${x}" width="${seg.toFixed(2)}" height="${BAR_H}" rx="2.5" fill="${EMPTY}"/>`
+    if (part >= 1) body += `<rect x="${x}" width="${seg.toFixed(2)}" height="${BAR_H}" rx="2.5" fill="${color}"/>`
+    else if (part > 0) body += `<rect x="${x}" width="${seg.toFixed(2)}" height="${BAR_H}" rx="2.5" fill="${color}" fill-opacity="${Math.max(0.25, part).toFixed(2)}"/>`
+  }
+  return svgDoc(w, BAR_H, body, false)
+}
+
+const dots = (left: number, cells: number): { on: string; off: string } => {
+  const n = Math.max(0, Math.min(cells, Math.round((left / 100) * cells)))
+  return { on: '●'.repeat(n), off: '·'.repeat(cells - n) }
 }
 
 /** What the cache drawings read, or null until a request and its context size are known. */
@@ -85,12 +204,90 @@ const measure = async ($: EngineInterface, lastAt: number | null, model: string 
   }))
 }
 
-export const register: Register = on => {
+// Opens the agents pane, or closes it when it is up; true when it ends up open.
+async function togglePane($: EngineInterface): Promise<boolean> {
+  const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
+  if (isOpen) {
+    await $.ui.close({ id: PANE })
+    return false
+  }
+  const at = await $.clock.now()
+  await update($, paneNow, () => at)
+  await $.ui.open({ id: PANE, title: 'Agents' })
+  return true
+}
+
+export const register: Register = (on, options) => {
+  // The agents view is opt-in: off, the band is the usage row alone, with no ⇄,
+  // no /agents-info and no subagent tracking.
+  const agentsOn = options.agentsView === 'on'
+
   on('session.start', async ($, e, next) => {
     await pull($)
     $.clock.every(TICK_MS, () => $.ui.invalidate('ui.render'))
+    if (!agentsOn) return next(e)
+    const saved = await $.store.get(MODE_KEY)
+    if (saved === 'usage' || saved === 'agents') await update($, viewMode, () => saved)
+    await $.command.register({
+      name: 'agents-info',
+      description: 'Show or hide the panel of subagents: running and finished, with model, context, cost and time',
+    })
+    // Ticks the running agents' clocks; quiet when nothing runs.
+    $.clock.every(1000, () => {
+      void (async () => {
+        const list = await read($, agents)
+        if (!list.some(a => a.status === 'running')) return
+        const at = await $.clock.now()
+        await update($, paneNow, () => at)
+      })()
+    })
     return next(e)
   })
+
+  if (agentsOn) {
+    on('command.run', { command: 'agents-info' }, async ($, e) => {
+      if ((e.args ?? '').trim() === 'open') {
+        const at = await $.clock.now()
+        await update($, paneNow, () => at)
+        await $.ui.open({ id: PANE, title: 'Agents' })
+        return { text: 'Agents panel opened.' }
+      }
+      return { text: (await togglePane($)) ? 'Agents panel opened.' : 'Agents panel closed.' }
+    })
+
+    // Subagents feed the agents bar and pane. A spawn with nothing running starts a new wave.
+    on('agent.spawn', async ($, e, next) => {
+      const started = await next(e)
+      // A workflow's remote agent has no agentId and no loop to report its end: not tracked.
+      const agentId = started.agentId
+      if (started.deny !== undefined || !agentId) return started
+      const at = await $.clock.now()
+      await update($, agents, list => {
+        const last = Math.max(0, ...list.map(a => a.wave))
+        const wave = list.some(a => a.status === 'running') ? last : last + 1
+        const round = 1 + list.filter(a => e.description && a.description === e.description).length
+        const run: AgentRun = {
+          id: agentId,
+          agentId,
+          type: e.subagentType,
+          description: e.description,
+          model: started.model,
+          status: 'running',
+          startedAt: at,
+          contextTokens: 0,
+          contextMax: windowOf(started.model),
+          tokens: 0,
+          costUsd: 0,
+          steps: 0,
+          round,
+          wave,
+        }
+        return [...list.filter(a => a.id !== run.id), run].slice(-200)
+      })
+      await update($, paneNow, () => at)
+      return started
+    })
+  }
 
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('rateLimits')) {
@@ -109,6 +306,8 @@ export const register: Register = on => {
     if (e.source === 'clear' || e.source === 'compact') {
       await update($, cache, () => null)
       await update($, fold, () => null)
+      // A compaction keeps the session's subagents; only a clear starts the list over.
+      if (agentsOn && e.source === 'clear') await update($, agents, () => [])
     } else if ((e.source === 'resume' || e.source === 'fork') && typeof e.seconds_since_last_response === 'number') {
       const now = await $.clock.now()
       const lastAt = now - e.seconds_since_last_response * 1000
@@ -121,17 +320,65 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e)) // a band that fails to seed never holds up the session
 
   // Each main-thread request reads or writes the cache, so its start resets the hour.
+  // A subagent's request instead updates its pane row: live context, tokens and cost.
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId) {
       const now = await $.clock.now()
       await update($, cache, c => ({ lastAt: now, tokens: c?.tokens ?? 0, window: c?.window ?? 0, model: c?.model ?? null }))
     }
-    yield* next(e)
+    const result = yield* next(e)
+    const agentId = e.agentId
+    const usage = result.usage
+    if (!agentsOn || !agentId || !usage) return result
+    const model = usage.model || e.model
+    // The context is what the request sent; the run's tokens also count what it wrote.
+    const prompt = (usage.input_tokens || 0) + (usage.cache_read_input_tokens || 0) + (usage.cache_creation_input_tokens || 0)
+    const sent = prompt + (usage.output_tokens || 0)
+    await update($, agents, list =>
+      list.map((a): AgentRun =>
+        a.agentId !== agentId
+          ? a
+          : {
+              ...a,
+              model,
+              effort: typeof e.effort === 'string' ? e.effort : a.effort,
+              status: 'running',
+              endedAt: undefined,
+              contextTokens: prompt,
+              contextMax: windowOf(model),
+              tokens: a.tokens + sent,
+              costUsd: a.costUsd + runCost(model, usage, true),
+              steps: a.steps + 1,
+            },
+      ),
+    )
+    return result
   })
 
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (e.agentId) return r
+    if (e.agentId) {
+      if (!agentsOn) return r
+      const agentId = e.agentId
+      const at = await $.clock.now()
+      const u = e.usage
+      await update($, agents, list =>
+        list.map((a): AgentRun => {
+          if (a.agentId !== agentId) return a
+          const ended: AgentRun = { ...a, status: e.reason === 'answer' ? 'done' : 'failed', endedAt: at }
+          // A run whose steps went unseen still gets the turn's own sum.
+          if (a.steps > 0 || !u) return ended
+          return {
+            ...ended,
+            model: u.model || a.model,
+            tokens: u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens,
+            costUsd: runCost(u.model || a.model, u, false),
+          }
+        }),
+      )
+      await update($, paneNow, () => at)
+      return r
+    }
     const now = await $.clock.now()
     const c = await read($, cache)
     // turn.step stamps the exact request time; when no step of this turn did, the turn's end is the floor.
@@ -139,6 +386,116 @@ export const register: Register = on => {
     await measure($, lastAt, e.usage?.model ?? null)
     return r
   })
+
+  if (agentsOn) {
+    // The agents pane, savvy-progress's live panel: every subagent of the session.
+    on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+      const ui = $.ui.resolve(e)
+      const { Box, Text, Button } = ui
+      const list = await read($, agents)
+      const p = await read($, panel)
+      const at = Math.max(await read($, paneNow), ...list.map(a => a.startedAt), 0)
+      const running = list.filter(a => a.status === 'running').reverse()
+      const finished = list.filter(a => a.status !== 'running').reverse()
+      const t = totals(list, at)
+      const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} tokens, ${fmtTime(t.time)}`
+
+      const toggleCompact = (
+        <Button key="compact" label={p.isCompact ? 'Expand' : 'Collapse'} plain
+          onPress={() => update($, panel, prev => ({ ...prev, isCompact: !prev.isCompact }))} />
+      )
+      const toggleDone = (
+        <Button key="done" label={`${p.isDoneCollapsed ? '▸' : '▾'} Finished · ${finished.length}`} plain
+          onPress={() => update($, panel, prev => ({ ...prev, isDoneCollapsed: !prev.isDoneCollapsed }))} />
+      )
+
+      if (e.surface === 'desktop' && 'Svg' in ui) {
+        const { Svg } = ui
+        const W = Math.max(240, Math.min(900, (e.props.bodyColumns || 40) * 8 - 8))
+        if (p.isCompact) {
+          return (
+            <Box flexDirection="column" gap={1}>
+              <Svg source={compactSvg(W, list, t)} alt={`${list.length} agents, ${summary}`} width={W} height={COMPACT_H} />
+              {toggleCompact}
+            </Box>
+          )
+        }
+        const shownDone = p.isDoneCollapsed ? 0 : finished.length
+        const lines = 1 + (list.length === 0 ? 1 : 0) + (running.length > 0 ? 1 : 0) + (finished.length > 0 ? 1 : 0)
+        const gridH = HEADER_H + lines * LINE_H + (running.length + shownDone) * AGENT_ROW_H
+        return (
+          <Box flexDirection="column">
+            {/* The grid sizes the pane; the content is laid over it. */}
+            {gridTiles(gridH).map((tileH, i) => (
+              <Svg key={`grid-${i}`} source={gridSvg(W, tileH)} alt="dotted grid" width={W} height={tileH} />
+            ))}
+            <Box flexDirection="column" position="absolute" top={0} left={0} right={0}>
+              <Svg source={headerSvg(W, t)} alt={summary} width={W} height={HEADER_H} />
+              {toggleCompact}
+              {list.length === 0 && <Text dimColor>No subagents yet.</Text>}
+              {running.length > 0 && <Text key="h-run" dimColor>{`Running · ${running.length}`}</Text>}
+              {running.map(a => (
+                <Svg key={a.id} source={agentSvg(W, a, at)} alt={`${a.description}: ${modelName(a.model)}, running`} width={W} height={AGENT_ROW_H} />
+              ))}
+              {finished.length > 0 && toggleDone}
+              {!p.isDoneCollapsed && finished.map(a => (
+                <Svg key={a.id} source={agentSvg(W, a, at)} alt={`${a.description}: ${modelName(a.model)}, finished`} width={W} height={AGENT_ROW_H} />
+              ))}
+            </Box>
+          </Box>
+        )
+      }
+
+      // Terminal: the same content in text rows.
+      const cols = Math.max(24, e.props.bodyColumns || 40)
+      const barW = Math.max(6, Math.min(20, cols - 34))
+      const row = (a: AgentRun) => {
+        const tier = tierOfType(a.type)
+        const color = colorOf(tier)
+        const ctx = ctxOf(a)
+        return (
+          <Box key={a.id} flexDirection="column" marginBottom={1}>
+            <Box flexDirection="row" gap={1}>
+              <Text color={color}>▣</Text>
+              <Text bold wrap="truncate-end">{a.description || a.type}</Text>
+              <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
+            </Box>
+            <Text dimColor wrap="truncate-end">
+              {'  '}{tier === 'other' ? a.type : tier} · {runModel(a)}{a.round > 1 ? ` · round ${a.round}` : ''}
+            </Text>
+            <Text wrap="truncate-end">
+              {'  '}
+              {a.status === 'done' ? <Text color={color}>{ctxBar(100, barW)}</Text> : <Text dimColor>{ctxBar(ctx, barW)}</Text>}
+              <Text dimColor>{` ctx ${ctx}% · ${fmtTokens(a.contextTokens)} ≈${fmtCost(a.costUsd)} ${fmtTime(elapsed(a, at))}`}</Text>
+            </Text>
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text dimColor>{`≈${fmtCost(t.cost)} · ${fmtTokens(t.tokens)} tokens · ${fmtTime(t.time)}`}</Text>
+            {toggleCompact}
+          </Box>
+          {p.isCompact ? (
+            <Text wrap="truncate-end">
+              {[...running, ...finished].map(a => (
+                <Text key={a.id} color={colorOf(tierOfType(a.type))}>{`${STATUS_GLYPH[a.status]} `}</Text>
+              ))}
+            </Text>
+          ) : (
+            <Box flexDirection="column" marginTop={1}>
+              {list.length === 0 && <Text dimColor>No subagents yet.</Text>}
+              {running.length > 0 && <Text dimColor>{`Running · ${running.length}`}</Text>}
+              {running.map(row)}
+              {finished.length > 0 && toggleDone}
+              {!p.isDoneCollapsed && finished.map(row)}
+            </Box>
+          )}
+        </Box>
+      )
+    })
+  }
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
@@ -151,6 +508,41 @@ export const register: Register = on => {
     const list = await read($, windows)
     const now = await $.clock.now()
     const view = viewOf(await read($, cache), now)
+    const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
+
+    // The ⇄ button: desktop only, like the fold button, so the terminal always shows usage.
+    const hasSwap = Svg !== null && agentsOn
+    const shown: ViewMode = hasSwap ? await read($, viewMode) : 'usage'
+    const swapTo = async (to: ViewMode) => {
+      await update($, viewMode, () => to)
+      await $.store.set(MODE_KEY, to)
+    }
+    const swapButton = (to: ViewMode, words: boolean, gapAfter: boolean) => (
+      <Box key="swap" flexShrink={0} marginRight={gapAfter ? 1 : 0}>
+        <Button key="ribbon-swap" label={words ? (to === 'agents' ? '⇄ Agents' : '⇄ Usage') : '⇄'} onPress={() => swapTo(to)} />
+      </Box>
+    )
+
+    if (Svg && shown === 'agents') {
+      const c = crewViewOf(await read($, agents))
+      const count = `×${c.total}`
+      const room = columns * DRAWN_COLUMN_PX
+      const words = room >= 520
+      const others = DRAWN_PX.pad + (words ? DRAWN_PX.wordSwap : DRAWN_PX.swap) + count.length * DRAWN_PX.char + 2 * DRAWN_PX.gap
+      const W = Math.max(180, Math.min(1000, Math.floor((room - others) / SAFETY)))
+      return (
+        <Box flexDirection="row" backgroundColor={BG} paddingX={1} alignItems="center">
+          <Box key="crew-row" flexShrink={0}>
+            <Svg source={crewRowSvg(c, W)} alt={`${c.title}: ${crewLabel(c)}, ${crewPercent(c)}`} width={W} height={ROW_H} />
+          </Box>
+          <Box key="sp-end" flexGrow={1} />
+          <Box key="crew-count" flexShrink={0} marginRight={1}>
+            <Button key="ribbon-agents" label={count} plain onPress={() => void togglePane($)} />
+          </Box>
+          {swapButton('usage', words, false)}
+        </Box>
+      )
+    }
 
     if (list.length === 0 && !view) {
       return (
@@ -160,71 +552,68 @@ export const register: Register = on => {
       )
     }
 
-    const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
-    const kind = kindOf(columns)
-    const isWide = kind === 'wide'
-    const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
+    const drawn = Svg !== null
+    const { tier, spare } = tierOf(columns, list, view, drawn, now, hasSwap)
+    // Half the room left over goes to the bars, so the row fills the band instead
+    // of leaving wide gaps; the other half stays as spacing between the groups.
+    const barW = tier.bar > 0 && drawn && list.length > 0
+      ? Math.min(BAR_MAX, Math.max(tier.bar, Math.floor(tier.bar + spare / 2 / list.length)))
+      : tier.bar
 
-    const parts = (w: Window) => {
-      const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
-      return {
-        left,
-        col: COLORS[w.kind] ?? TEXT,
-        name: NAMES[w.kind] ?? w.kind.toUpperCase(),
-        d: dots(left, cells),
-        reset: fmtReset(w.resetsAt, now),
+    const win = (w: Window, i: number) => {
+      const left = leftOf(w)
+      const col = COLORS[w.kind] ?? TEXT
+      const reset = tier.resets ? fmtShort(w.resetsAt, now) : ''
+      const pct = `${left}%`
+      const pctText = tier.words ? `${pct} left` : pct
+      let bar = null
+      if (tier.bar > 0) {
+        if (Svg) {
+          bar = [<Svg key="bar" source={barSvg(left, col, barW)} alt={`${pct} left`} width={barW} height={BAR_H} />]
+        } else {
+          const d = dots(left, TERM_CELLS)
+          bar = [<Text key="on" color={col}>{d.on}</Text>, <Text key="off" color={EMPTY}>{d.off}</Text>]
+        }
       }
-    }
-
-    // Wide: every window on one row. Narrow: each window is a block of three
-    // lines (name and dots, percent left, reset time) so nothing wraps or clips.
-    const wide = (w: Window, i: number) => {
-      const p = parts(w)
       return (
-        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
-          <Text color={MUTED} bold>{p.name} </Text>
-          <Text color={p.col}>{p.d.on}</Text>
-          <Text color={EMPTY}>{p.d.off}</Text>
-          <Text color={p.col} bold> {p.left}% left</Text>
-          {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
-          {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
+        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={2} alignItems="center">
+          <Text color={MUTED} bold>{`${NAMES[w.kind] ?? w.kind} `}</Text>
+          {bar}
+          {left < LOW_AT
+            ? [<Text key="sp"> </Text>, <Text key="pct" backgroundColor={HUE.warm} color={TEXT} bold>{` ${pctText} `}</Text>]
+            : <Text color={col} bold>{` ${pctText}`}</Text>}
+          {reset ? <Text color={MUTED}>{` ${reset}`}</Text> : null}
         </Box>
       )
     }
 
-    const stacked = (w: Window, i: number) => {
-      const p = parts(w)
-      return (
-        <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={3}>
-          <Box flexDirection="row">
-            <Text color={MUTED} bold>{p.name} </Text>
-            <Text color={p.col}>{p.d.on}</Text>
-            <Text color={EMPTY}>{p.d.off}</Text>
-          </Box>
-          <Box flexDirection="row">
-            <Text color={p.col} bold>{p.left}% left</Text>
-            {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
-          </Box>
-          {p.reset ? <Text color={MUTED}>resets {p.reset}</Text> : null}
-        </Box>
-      )
-    }
+    // The room left over is shared between the groups, so they sit evenly across
+    // the band instead of bunching up on the left with a gap before the button.
+    // On desktop a small dot sits in the middle of each gap between groups.
+    const between = (k: number): RenderChildren[] =>
+      Svg
+        ? [
+            <Box key={`sp-a-${k}`} flexGrow={1} />,
+            <Box key={`sep-${k}`} flexShrink={0} marginRight={1}>
+              <Text color={MUTED}>•</Text>
+            </Box>,
+            <Box key={`sp-b-${k}`} flexGrow={1} />,
+          ]
+        : [<Box key={`sp-${k}`} flexGrow={1} />]
+    const spread = (groups: RenderChildren[], end?: RenderChildren): RenderChildren[] => [
+      ...groups.filter(Boolean).flatMap((el, i) => (i === 0 ? [el] : [...between(i), el])),
+      ...(end ? [<Box key="sp-end" flexGrow={1} />, end] : []),
+    ]
 
-    const label = (
-      <Box key="label" flexShrink={0} marginRight={isWide ? 2 : 3}>
-        <Text color={TEXT} bold>USAGE</Text>
-      </Box>
-    )
     const usage = list.length > 0
-      ? list.map(isWide ? wide : stacked)
-      : [<Box key="wait" flexShrink={0} marginRight={3}><Text color={MUTED}>waiting for the first reply</Text></Box>]
+      ? list.map(win)
+      : [<Box key="wait" flexShrink={0} marginRight={2}><Text color={MUTED}>waiting for the first reply</Text></Box>]
 
-    // Before the first reply there is no cache to show: today's band, as it was.
+    // Before the first reply there is no cache to show, and nothing to fold.
     if (!view) {
       return (
-        <Box flexDirection="row" backgroundColor={BG} paddingX={1}>
-          {label}
-          {usage}
+        <Box flexDirection="row" backgroundColor={BG} paddingX={1} alignItems="center">
+          {spread(usage, hasSwap ? swapButton('agents', tier.words === true, false) : undefined)}
         </Box>
       )
     }
@@ -232,106 +621,71 @@ export const register: Register = on => {
     const mode = view.mode
     const cold = mode === 'cold'
     const hue = HUE[mode]
-    const mine = mineModel(view)
     const stored = await read($, fold)
     // Folding needs the card, and the card is a drawing: the terminal stays folded.
     const open = Svg !== null && (stored && stored.mode === mode ? stored.open : cold)
     const toggle = () =>
       update($, fold, f => ({ mode, open: !(f && f.mode === mode ? f.open : mode === 'cold') }))
 
-    const badge = Svg
-      ? [
-          <Svg key="robo" source={roboSvg(mode)} alt={cold ? 'Robo, frozen' : 'Robo, bobbing'} width={ROBO_SIZE} height={ROBO_SIZE} isInteractive />,
-          <Text key="gap"> </Text>,
-          (() => {
-            const c = chipSvg(mode)
-            return <Svg key="chip" source={c.source} alt={WORD[mode]} width={c.w} height={c.h} />
-          })(),
-        ]
-      : [<Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
+    const chip = Svg && tier.svgChip
+      ? (() => {
+          const c = chipSvg(mode)
+          return <Svg key="chip" source={c.source} alt={WORD[mode]} width={c.w} height={c.h} />
+        })()
+      : <Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>
+    const tail = tailOf(view, tier)
+    const mine = mineModel(view)
+    const price = cold && mine ? usd(costOf(mine, mode, view.tokens)) : ''
+    const tailEl = !tail ? null
+      : cold && price
+        ? [
+            tail.trim() !== price ? <Text key="idle" color={hue} bold>{tail.slice(0, tail.length - price.length)}</Text> : <Text key="sp"> </Text>,
+            <Text key="price" color={TEXT} bold>{price}</Text>,
+          ]
+        : <Text key="tail" color={hue} bold>{tail}</Text>
 
-    const summary = cold
-      ? [
-          <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
-          mine ? <Text key="dot" color={MUTED}> · </Text> : null,
-          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
-        ]
-      : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
+    const cacheEl = (
+      <Box key="cache" flexDirection="row" flexShrink={0} marginRight={2} alignItems="center">
+        {Svg && tier.robo
+          ? [<Svg key="robo" source={roboSvg(mode)} alt={cold ? 'Robo, frozen' : 'Robo, bobbing'} width={ROBO_SIZE} height={ROBO_SIZE} isInteractive />, <Text key="gap"> </Text>]
+          : null}
+        {chip}
+        {tailEl}
+      </Box>
+    )
 
+    // ⇄ sits just before the fold button, which still closes the row.
     const button = Svg ? (
-      <Box key="fold" flexShrink={0} alignItems="flex-start">
-        <Button key="cache-fold" label={open ? 'Hide' : 'Show'} onPress={toggle} />
+      <Box key="end" flexDirection="row" flexShrink={0} alignItems="center">
+        {hasSwap ? swapButton('agents', tier.words === true, true) : null}
+        <Box key="fold" flexShrink={0}>
+          <Button key="cache-fold" label={tier.words ? (open ? 'Hide ▴' : 'Show ▾') : open ? '▴' : '▾'} onPress={toggle} />
+        </Box>
       </Box>
     ) : null
-    const grow = <Box key="grow" flexGrow={1} />
 
-    let rows
-    if (kind === 'wide') {
-      rows = (
-        <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
-          {label}
-          {usage}
-          {open ? null : (
-            <Box key="inline" flexDirection="row" flexShrink={0} marginRight={2} alignItems="center">
-              {badge}
-              {summary}
-            </Box>
-          )}
-          {grow}
-          {button}
-        </Box>
-      )
-    } else if (kind === 'stacked') {
-      // The cache becomes a third stacked block, the same shape as 7D and 5H.
-      rows = (
-        <Box key="row" flexDirection="row" paddingX={1}>
-          {label}
-          {usage}
-          {open ? null : (
-            <Box key="block" flexDirection="column" flexShrink={0} marginRight={2}>
-              <Box flexDirection="row" alignItems="center">{badge}</Box>
-              <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
-              {mine ? (
-                <Box flexDirection="row">
-                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
-                  <Text color={MUTED}> next</Text>
-                </Box>
-              ) : null}
-            </Box>
-          )}
-          {grow}
-          {button}
-        </Box>
-      )
-    } else {
-      // Narrow: the cache gets its own row under the usage blocks.
-      rows = [
-        <Box key="row" flexDirection="row" paddingX={1}>
-          {label}
-          {usage}
-        </Box>,
-        <Box key="cache" flexDirection="row" paddingX={1} alignItems="center">
-          {badge}
-          {summary}
-          {grow}
-          {button}
-        </Box>,
-      ]
-    }
+    const row = (
+      <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
+        {spread([...usage, cacheEl], button)}
+      </Box>
+    )
 
     let card = null
     if (open && Svg) {
-      const c = cardSvg(view, kind, bandPx(columns))
+      // The card is drawn at the band's real width: desktop columns are ~8.65 px.
+      const W = Math.floor(columns * DRAWN_COLUMN_PX)
+      const cardKind = W >= 1000 ? 'wide' : W >= 620 ? 'stacked' : 'tight'
+      const c = cardSvg(view, cardKind, W)
       card = (
         <Box key="card" flexDirection="row">
-          <Svg source={c.source} alt={c.alt} width={c.w} height={c.h} isInteractive={kind !== 'tight'} />
+          <Svg source={c.source} alt={c.alt} width={c.w} height={c.h} isInteractive={cardKind !== 'tight'} />
         </Box>
       )
     }
 
     return (
       <Box flexDirection="column" backgroundColor={BG}>
-        {rows}
+        {row}
         {card}
       </Box>
     )
