@@ -143,196 +143,210 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
 
-    const ui = $.ui.resolve(e)
-    const { Box, Button, Text } = ui
-    // Svg draws on desktop, mobile and VS Code; the terminal gets the text form.
-    // Ask the surface, not the table: the terminal's table still lists Svg.
-    const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null
-    const list = await read($, windows)
-    const now = await $.clock.now()
-    const view = viewOf(await read($, cache), now)
+    // Keep other mods' bands (savvy-progress, say) stacked above this one. Claude Code's own
+    // placeholder ({ type: 'engine' }) is never nested: the desktop drops a band that nests it.
+    const drawn = await Promise.resolve(next(e)).catch(() => null)
+    const above = drawn && typeof drawn === 'object' && (drawn as { type?: string }).type !== 'engine' ? drawn : null
+    const own = await (async () => {
+      const ui = $.ui.resolve(e)
+      const { Box, Button, Text } = ui
+      // Svg draws on desktop, mobile and VS Code; the terminal gets the text form.
+      // Ask the surface, not the table: the terminal's table still lists Svg.
+      const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null
+      const list = await read($, windows)
+      const now = await $.clock.now()
+      const view = viewOf(await read($, cache), now)
 
-    if (list.length === 0 && !view) {
-      return (
-        <Box backgroundColor={BG} paddingX={1}>
-          <Text color={MUTED}>USAGE · waiting for the first reply</Text>
-        </Box>
-      )
-    }
-
-    const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
-    const kind = kindOf(columns)
-    const isWide = kind === 'wide'
-    const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
-
-    const parts = (w: Window) => {
-      const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
-      return {
-        left,
-        col: COLORS[w.kind] ?? TEXT,
-        name: NAMES[w.kind] ?? w.kind.toUpperCase(),
-        d: dots(left, cells),
-        reset: fmtReset(w.resetsAt, now),
+      if (list.length === 0 && !view) {
+        return (
+          <Box backgroundColor={BG} paddingX={1}>
+            <Text color={MUTED}>USAGE · waiting for the first reply</Text>
+          </Box>
+        )
       }
-    }
 
-    // Wide: every window on one row. Narrow: each window is a block of three
-    // lines (name and dots, percent left, reset time) so nothing wraps or clips.
-    const wide = (w: Window, i: number) => {
-      const p = parts(w)
-      return (
-        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
-          <Text color={MUTED} bold>{p.name} </Text>
-          <Text color={p.col}>{p.d.on}</Text>
-          <Text color={EMPTY}>{p.d.off}</Text>
-          <Text color={p.col} bold> {p.left}% left</Text>
-          {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
-          {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
-        </Box>
-      )
-    }
+      const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
+      const kind = kindOf(columns)
+      const isWide = kind === 'wide'
+      const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
 
-    const stacked = (w: Window, i: number) => {
-      const p = parts(w)
-      return (
-        <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={3}>
-          <Box flexDirection="row">
+      const parts = (w: Window) => {
+        const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
+        return {
+          left,
+          col: COLORS[w.kind] ?? TEXT,
+          name: NAMES[w.kind] ?? w.kind.toUpperCase(),
+          d: dots(left, cells),
+          reset: fmtReset(w.resetsAt, now),
+        }
+      }
+
+      // Wide: every window on one row. Narrow: each window is a block of three
+      // lines (name and dots, percent left, reset time) so nothing wraps or clips.
+      const wide = (w: Window, i: number) => {
+        const p = parts(w)
+        return (
+          <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
             <Text color={MUTED} bold>{p.name} </Text>
             <Text color={p.col}>{p.d.on}</Text>
             <Text color={EMPTY}>{p.d.off}</Text>
-          </Box>
-          <Box flexDirection="row">
-            <Text color={p.col} bold>{p.left}% left</Text>
+            <Text color={p.col} bold> {p.left}% left</Text>
             {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
+            {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
           </Box>
-          {p.reset ? <Text color={MUTED}>resets {p.reset}</Text> : null}
+        )
+      }
+
+      const stacked = (w: Window, i: number) => {
+        const p = parts(w)
+        return (
+          <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={3}>
+            <Box flexDirection="row">
+              <Text color={MUTED} bold>{p.name} </Text>
+              <Text color={p.col}>{p.d.on}</Text>
+              <Text color={EMPTY}>{p.d.off}</Text>
+            </Box>
+            <Box flexDirection="row">
+              <Text color={p.col} bold>{p.left}% left</Text>
+              {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
+            </Box>
+            {p.reset ? <Text color={MUTED}>resets {p.reset}</Text> : null}
+          </Box>
+        )
+      }
+
+      const label = (
+        <Box key="label" flexShrink={0} marginRight={isWide ? 2 : 3}>
+          <Text color={TEXT} bold>USAGE</Text>
         </Box>
       )
-    }
+      const usage = list.length > 0
+        ? list.map(isWide ? wide : stacked)
+        : [<Box key="wait" flexShrink={0} marginRight={3}><Text color={MUTED}>waiting for the first reply</Text></Box>]
 
-    const label = (
-      <Box key="label" flexShrink={0} marginRight={isWide ? 2 : 3}>
-        <Text color={TEXT} bold>USAGE</Text>
-      </Box>
-    )
-    const usage = list.length > 0
-      ? list.map(isWide ? wide : stacked)
-      : [<Box key="wait" flexShrink={0} marginRight={3}><Text color={MUTED}>waiting for the first reply</Text></Box>]
+      // Before the first reply there is no cache to show: today's band, as it was.
+      if (!view) {
+        return (
+          <Box flexDirection="row" backgroundColor={BG} paddingX={1}>
+            {label}
+            {usage}
+          </Box>
+        )
+      }
 
-    // Before the first reply there is no cache to show: today's band, as it was.
-    if (!view) {
+      const mode = view.mode
+      const cold = mode === 'cold'
+      const hue = HUE[mode]
+      const mine = mineModel(view)
+      const stored = await read($, fold)
+      // Folding needs the card, and the card is a drawing: the terminal stays folded.
+      const open = Svg !== null && (stored && stored.mode === mode ? stored.open : cold)
+      const toggle = () =>
+        update($, fold, f => ({ mode, open: !(f && f.mode === mode ? f.open : mode === 'cold') }))
+
+      const badge = Svg
+        ? [
+            <Svg key="robo" source={roboSvg(mode)} alt={cold ? 'Robo, frozen' : 'Robo, bobbing'} width={ROBO_SIZE} height={ROBO_SIZE} isInteractive />,
+            <Text key="gap"> </Text>,
+            (() => {
+              const c = chipSvg(mode)
+              return <Svg key="chip" source={c.source} alt={WORD[mode]} width={c.w} height={c.h} />
+            })(),
+          ]
+        : [<Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
+
+      const summary = cold
+        ? [
+            <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
+            mine ? <Text key="dot" color={MUTED}> · </Text> : null,
+            mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
+          ]
+        : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
+
+      const button = Svg ? (
+        <Box key="fold" flexShrink={0} alignItems="flex-start">
+          <Button key="cache-fold" label={open ? 'Hide' : 'Show'} onPress={toggle} />
+        </Box>
+      ) : null
+      const grow = <Box key="grow" flexGrow={1} />
+
+      let rows
+      if (kind === 'wide') {
+        rows = (
+          <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
+            {label}
+            {usage}
+            {open ? null : (
+              <Box key="inline" flexDirection="row" flexShrink={0} marginRight={2} alignItems="center">
+                {badge}
+                {summary}
+              </Box>
+            )}
+            {grow}
+            {button}
+          </Box>
+        )
+      } else if (kind === 'stacked') {
+        // The cache becomes a third stacked block, the same shape as 7D and 5H.
+        rows = (
+          <Box key="row" flexDirection="row" paddingX={1}>
+            {label}
+            {usage}
+            {open ? null : (
+              <Box key="block" flexDirection="column" flexShrink={0} marginRight={2}>
+                <Box flexDirection="row" alignItems="center">{badge}</Box>
+                <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
+                {mine ? (
+                  <Box flexDirection="row">
+                    <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
+                    <Text color={MUTED}> next</Text>
+                  </Box>
+                ) : null}
+              </Box>
+            )}
+            {grow}
+            {button}
+          </Box>
+        )
+      } else {
+        // Narrow: the cache gets its own row under the usage blocks.
+        rows = [
+          <Box key="row" flexDirection="row" paddingX={1}>
+            {label}
+            {usage}
+          </Box>,
+          <Box key="cache" flexDirection="row" paddingX={1} alignItems="center">
+            {badge}
+            {summary}
+            {grow}
+            {button}
+          </Box>,
+        ]
+      }
+
+      let card = null
+      if (open && Svg) {
+        const c = cardSvg(view, kind, bandPx(columns))
+        card = (
+          <Box key="card" flexDirection="row">
+            <Svg source={c.source} alt={c.alt} width={c.w} height={c.h} isInteractive={kind !== 'tight'} />
+          </Box>
+        )
+      }
+
       return (
-        <Box flexDirection="row" backgroundColor={BG} paddingX={1}>
-          {label}
-          {usage}
+        <Box flexDirection="column" backgroundColor={BG}>
+          {rows}
+          {card}
         </Box>
       )
-    }
-
-    const mode = view.mode
-    const cold = mode === 'cold'
-    const hue = HUE[mode]
-    const mine = mineModel(view)
-    const stored = await read($, fold)
-    // Folding needs the card, and the card is a drawing: the terminal stays folded.
-    const open = Svg !== null && (stored && stored.mode === mode ? stored.open : cold)
-    const toggle = () =>
-      update($, fold, f => ({ mode, open: !(f && f.mode === mode ? f.open : mode === 'cold') }))
-
-    const badge = Svg
-      ? [
-          <Svg key="robo" source={roboSvg(mode)} alt={cold ? 'Robo, frozen' : 'Robo, bobbing'} width={ROBO_SIZE} height={ROBO_SIZE} isInteractive />,
-          <Text key="gap"> </Text>,
-          (() => {
-            const c = chipSvg(mode)
-            return <Svg key="chip" source={c.source} alt={WORD[mode]} width={c.w} height={c.h} />
-          })(),
-        ]
-      : [<Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
-
-    const summary = cold
-      ? [
-          <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
-          mine ? <Text key="dot" color={MUTED}> · </Text> : null,
-          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
-        ]
-      : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
-
-    const button = Svg ? (
-      <Box key="fold" flexShrink={0} alignItems="flex-start">
-        <Button key="cache-fold" label={open ? 'Hide' : 'Show'} onPress={toggle} />
-      </Box>
-    ) : null
-    const grow = <Box key="grow" flexGrow={1} />
-
-    let rows
-    if (kind === 'wide') {
-      rows = (
-        <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
-          {label}
-          {usage}
-          {open ? null : (
-            <Box key="inline" flexDirection="row" flexShrink={0} marginRight={2} alignItems="center">
-              {badge}
-              {summary}
-            </Box>
-          )}
-          {grow}
-          {button}
-        </Box>
-      )
-    } else if (kind === 'stacked') {
-      // The cache becomes a third stacked block, the same shape as 7D and 5H.
-      rows = (
-        <Box key="row" flexDirection="row" paddingX={1}>
-          {label}
-          {usage}
-          {open ? null : (
-            <Box key="block" flexDirection="column" flexShrink={0} marginRight={2}>
-              <Box flexDirection="row" alignItems="center">{badge}</Box>
-              <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
-              {mine ? (
-                <Box flexDirection="row">
-                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
-                  <Text color={MUTED}> next</Text>
-                </Box>
-              ) : null}
-            </Box>
-          )}
-          {grow}
-          {button}
-        </Box>
-      )
-    } else {
-      // Narrow: the cache gets its own row under the usage blocks.
-      rows = [
-        <Box key="row" flexDirection="row" paddingX={1}>
-          {label}
-          {usage}
-        </Box>,
-        <Box key="cache" flexDirection="row" paddingX={1} alignItems="center">
-          {badge}
-          {summary}
-          {grow}
-          {button}
-        </Box>,
-      ]
-    }
-
-    let card = null
-    if (open && Svg) {
-      const c = cardSvg(view, kind, bandPx(columns))
-      card = (
-        <Box key="card" flexDirection="row">
-          <Svg source={c.source} alt={c.alt} width={c.w} height={c.h} isInteractive={kind !== 'tight'} />
-        </Box>
-      )
-    }
-
+    })()
+    if (!above) return own
+    const { Box } = $.ui.resolve(e)
     return (
-      <Box flexDirection="column" backgroundColor={BG}>
-        {rows}
-        {card}
+      <Box flexDirection="column">
+        {above}
+        {own}
       </Box>
     )
   })
