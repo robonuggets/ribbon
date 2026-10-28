@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { CacheFacts, Fold, Window } from '../types'
 import {
   BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
-  bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
+  bandPx, cardSvg, chipSvg, familyOf, fmtIdle, kindOf, mineModel, priceOf, roboSvg, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
 
@@ -65,6 +65,7 @@ export const viewOf = (c: CacheFacts | null, now: number): CacheView | null => {
     tokens: c.tokens,
     window: c.window,
     mine: familyOf(c.model),
+    ...(c.usd !== undefined ? { usd: c.usd } : {}),
   }
 }
 
@@ -115,7 +116,9 @@ export const register: Register = on => {
       const window = (await $.session.usage()).context.window
       const model = typeof e.model === 'string' ? e.model : await $.session.model()
       const tokens = typeof e.context_tokens === 'number' ? e.context_tokens : 0
-      await update($, cache, () => ({ lastAt, tokens, window, model }))
+      // Claude Code prices the re-cache itself, at the managed or list rate: better than the table.
+      const usd = typeof e.estimated_cache_write_usd === 'number' && e.estimated_cache_write_usd > 0 ? e.estimated_cache_write_usd : undefined
+      await update($, cache, () => ({ lastAt, tokens, window, model, ...(usd !== undefined ? { usd } : {}) }))
     }
     return r
   }).catch(($, e, next) => next(e)) // a band that fails to seed never holds up the session
@@ -254,7 +257,7 @@ export const register: Register = on => {
       ? [
           <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
           mine ? <Text key="dot" color={MUTED}> · </Text> : null,
-          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
+          mine ? <Text key="cost" color={TEXT} bold>{usd(priceOf(view, mine))}</Text> : null,
         ]
       : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
 
@@ -293,7 +296,7 @@ export const register: Register = on => {
               <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
               {mine ? (
                 <Box flexDirection="row">
-                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
+                  <Text color={TEXT} bold>{usd(priceOf(view, mine))}</Text>
                   <Text color={MUTED}> next</Text>
                 </Box>
               ) : null}

@@ -85,9 +85,15 @@ export type CacheView = {
   window: number
   /** This session's MODELS id, or null when the model isn't priced. */
   mine: string | null
+  /** Claude Code's own re-cache estimate after a resume; it wins over the table for this session's model. */
+  usd?: number
 }
 
 export const mineModel = (v: CacheView): Model | undefined => MODELS.find(m => m.id === v.mine)
+
+/** What the next message costs on `m`: Claude Code's estimate when cold on this session's model, else the table's. */
+export const priceOf = (v: CacheView, m: Model): number =>
+  v.mode === 'cold' && v.usd !== undefined && m.id === v.mine ? v.usd : costOf(m, v.mode, v.tokens)
 
 // ---------- SVG helpers ----------
 export const svgDoc = (w: number, h: number, body: string, font: boolean): string =>
@@ -285,13 +291,13 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
     const top = Math.max(...MODELS.map(m => coldCost(m, v.tokens)))
     MODELS.forEach((m, i) => {
       const mine = m.id === v.mine
-      const n = top > 0 ? Math.max(1, Math.round((costOf(m, mode, v.tokens) / top) * k.rows)) : 1
+      const n = top > 0 ? Math.max(1, Math.round((priceOf(v, m) / top) * k.rows)) : 1
       const bx = x + i * colW
       for (let r = 0; r < k.rows; r++)
         for (let c = 0; c < 3; c++)
           g += `<circle cx="${bx + 3 + c * 8}" cy="${y + k.base - r * k.step}" r="2.8" fill="${r < n ? (mine ? HUEM : MUTED) : EMPTY}"/>`
       if (mine) g += chipShapes(bx + 30, y + k.chip, 'YOU', HUEM, 10, 0.8).svg
-      g += t(bx + 30, y + k.price, usd(costOf(m, mode, v.tokens)), { size: 17, w: mine ? 700 : 500, fill: mine ? TEXT : MUTED })
+      g += t(bx + 30, y + k.price, usd(priceOf(v, m)), { size: 17, w: mine ? 700 : 500, fill: mine ? TEXT : MUTED })
       g += t(bx + 30, y + k.name, m.NAME, { size: 11, w: 700, fill: mine ? HUEM : MUTED, ls: 0.8 })
     })
     return g
