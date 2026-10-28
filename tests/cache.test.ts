@@ -13,6 +13,8 @@ const PROPS = {
   scroll: { offset: 0, bodyRows: 12 },
   view: {},
 } as const
+/** Wide enough for the full row: label, both windows, the badge and the button. */
+const WIDE = { ...PROPS, bodyColumns: 110 } as const
 const WARM_IDLE = 18 * 60 // 18 minutes: warm, cold in 42m
 const COLD_IDLE = (3 * 24 + 9) * 3600 // 3d 9h: cold
 
@@ -25,7 +27,7 @@ test('a warm cache shows Robo, the WARM chip and the minutes left, folded', asyn
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: WARM_IDLE, context_tokens: 770000, model: 'claude-opus-5-5' })
 
-  const band = await $.ui.mount({ plugin: 'ribbon', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  const band = await $.ui.mount({ plugin: 'ribbon', surface: 'desktop', component: 'AbovePrompt', props: WIDE })
   // Drawings keep no key in the kit, so they are found by what they say.
   const alts = (await band.findAll({ type: 'Svg' })).map(s => s.props.alt)
   expect(alts).toEqual(['Robo, bobbing', 'WARM'])
@@ -36,6 +38,27 @@ test('a warm cache shows Robo, the WARM chip and the minutes left, folded', asyn
   await band.press({ key: 'cache-fold' })
   expect(await band.find({ key: 'card' })).toBeDefined()
   expect((await band.find({ key: 'cache-fold' }))?.props.label).toBe('Hide')
+  await band.unmount()
+})
+
+test('a row too long to fit shortens, and still holds every fact on one line', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: NOW })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 }, rateLimits: WINDOWS } }))
+  on('classic.SessionStart', () => ({}))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: WARM_IDLE, context_tokens: 770000, model: 'claude-opus-5-5' })
+
+  // 80 columns: the full row wants about 95, so it shortens instead of running off the edge.
+  const band = await $.ui.mount({ plugin: 'ribbon', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  // Bare percentages, not "% left", and no "resets" line: still one row, not a stack.
+  expect(await band.find({ text: '% left' })).toBeUndefined()
+  expect(await band.find({ text: 'resets ' })).toBeUndefined()
+  expect(await band.find({ text: ' 42m' })).toBeDefined()
+  expect(await band.find({ text: ' 99%' })).toBeDefined()
+  // The fold button survives the squeeze: it was the first thing the clipping ate.
+  expect((await band.find({ key: 'cache-fold' }))?.props.label).toBe('Show')
   await band.unmount()
 })
 

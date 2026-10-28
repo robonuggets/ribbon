@@ -3,10 +3,10 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CacheFacts, Fold, Window } from '../types'
 import {
-  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
-  bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
+  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TIGHT_AT, TTL_MIN, TTL_MS, WORD, YELLOW,
+  bandPx, cardSvg, chipSvg, colsOf, costOf, familyOf, fmtIdle, mineModel, roboSvg, usd,
 } from './cache-art'
-import type { CacheView } from './cache-art'
+import type { CacheView, Kind } from './cache-art'
 
 // A band above the prompt in a warm dark look: card surface, cream text,
 // dot-matrix bars. Shows how much of each usage window is LEFT, 7-day first, then
@@ -161,11 +161,8 @@ export const register: Register = on => {
     }
 
     const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
-    const kind = kindOf(columns)
-    const isWide = kind === 'wide'
-    const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
 
-    const parts = (w: Window) => {
+    const parts = (w: Window, cells: number) => {
       const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
       return {
         left,
@@ -176,24 +173,80 @@ export const register: Register = on => {
       }
     }
 
+    // The one row clips rather than wraps, so what it costs is measured from the
+    // very strings it draws, and it is used only while that fits the slot.
+    const pctText = (left: number, compact: boolean) => (compact ? ` ${left}%` : ` ${left}% left`)
+    const tailText = (reset: string) => (reset ? ` · ${reset}` : '')
+
+    const cacheMode = view ? view.mode : null
+    const mine = view ? mineModel(view) : null
+    const costText = view && cacheMode && mine ? usd(costOf(mine, cacheMode, view.tokens)) : ''
+    const leftMin = view ? Math.max(0, TTL_MIN - view.idleMin) : 0
+    const chip = Svg && cacheMode ? chipSvg(cacheMode) : null
+    const stored = await read($, fold)
+    // Folding needs the card, and the card is a drawing: the terminal stays folded.
+    const open = view !== null && Svg !== null &&
+      (stored && stored.mode === cacheMode ? stored.open : cacheMode === 'cold')
+
+    const warmText = (compact: boolean) => (compact ? ` ${leftMin}m` : ` ${leftMin}m left`)
+    const summaryText = (compact: boolean): string =>
+      !view ? '' : cacheMode === 'cold' ? ` ${view.idle}${mine ? ` · ${costText}` : ''}` : warmText(compact)
+
+    const LABEL_COLS = 'USAGE'.length + 2
+    const BUTTON_COLS = 9 // the fold button's label and the chrome around it
+    const badgeCols = !view || !cacheMode
+      ? 0
+      : chip ? colsOf(ROBO_SIZE) + 1 + colsOf(chip.w) : WORD[cacheMode].length + 2
+
+    /** What the one-row form costs, label to fold button, at a dot count and wording. */
+    const rowCols = (cells: number, compact: boolean): number =>
+      LABEL_COLS +
+      list.reduce((sum, w) => {
+        const p = parts(w, cells)
+        return sum + p.name.length + 1 + cells + pctText(p.left, compact).length +
+          (p.left < LOW_AT ? 4 : 0) + tailText(p.reset).length + 3
+      }, 0) +
+      (!view || open ? 0 : badgeCols + summaryText(compact).length + 2) +
+      (view && Svg ? BUTTON_COLS : 0)
+
+    // One row for as long as one row fits: the full row first, then a compact one
+    // with short bars and bare percentages. Stacking costs height, so it is the
+    // last resort rather than the first.
+    const SLACK = 2
+    let kind: Kind = 'wide'
+    let cells = CELLS
+    let compact = false
+    if (columns >= rowCols(CELLS, false) + SLACK) {
+      // the full row, as it was
+    } else if (columns >= rowCols(TIGHT_CELLS, true) + SLACK) {
+      cells = TIGHT_CELLS
+      compact = true
+    } else if (columns >= TIGHT_AT) {
+      kind = 'stacked'
+    } else {
+      kind = 'tight'
+      cells = TIGHT_CELLS
+    }
+    const isWide = kind === 'wide'
+
     // Wide: every window on one row. Narrow: each window is a block of three
     // lines (name and dots, percent left, reset time) so nothing wraps or clips.
     const wide = (w: Window, i: number) => {
-      const p = parts(w)
+      const p = parts(w, cells)
       return (
         <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
           <Text color={MUTED} bold>{p.name} </Text>
           <Text color={p.col}>{p.d.on}</Text>
           <Text color={EMPTY}>{p.d.off}</Text>
-          <Text color={p.col} bold> {p.left}% left</Text>
+          <Text color={p.col} bold>{pctText(p.left, compact)}</Text>
           {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
-          {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
+          {p.reset ? <Text color={MUTED}>{tailText(p.reset)}</Text> : null}
         </Box>
       )
     }
 
     const stacked = (w: Window, i: number) => {
-      const p = parts(w)
+      const p = parts(w, cells)
       return (
         <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={3}>
           <Box flexDirection="row">
@@ -232,21 +285,14 @@ export const register: Register = on => {
     const mode = view.mode
     const cold = mode === 'cold'
     const hue = HUE[mode]
-    const mine = mineModel(view)
-    const stored = await read($, fold)
-    // Folding needs the card, and the card is a drawing: the terminal stays folded.
-    const open = Svg !== null && (stored && stored.mode === mode ? stored.open : cold)
     const toggle = () =>
       update($, fold, f => ({ mode, open: !(f && f.mode === mode ? f.open : mode === 'cold') }))
 
-    const badge = Svg
+    const badge = Svg && chip
       ? [
           <Svg key="robo" source={roboSvg(mode)} alt={cold ? 'Robo, frozen' : 'Robo, bobbing'} width={ROBO_SIZE} height={ROBO_SIZE} isInteractive />,
           <Text key="gap"> </Text>,
-          (() => {
-            const c = chipSvg(mode)
-            return <Svg key="chip" source={c.source} alt={WORD[mode]} width={c.w} height={c.h} />
-          })(),
+          <Svg key="chip" source={chip.source} alt={WORD[mode]} width={chip.w} height={chip.h} />,
         ]
       : [<Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
 
@@ -254,9 +300,9 @@ export const register: Register = on => {
       ? [
           <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
           mine ? <Text key="dot" color={MUTED}> · </Text> : null,
-          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
+          mine ? <Text key="cost" color={TEXT} bold>{costText}</Text> : null,
         ]
-      : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
+      : [<Text key="left" color={hue} bold>{warmText(compact)}</Text>]
 
     const button = Svg ? (
       <Box key="fold" flexShrink={0} alignItems="flex-start">

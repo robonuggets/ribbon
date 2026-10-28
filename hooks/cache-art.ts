@@ -38,7 +38,11 @@ export const kindOf = (columns: number): Kind => (columns >= WIDE_AT ? 'wide' : 
  * for its [-], and a cell is 12 px (the app's code font advance). Rounds down,
  * so the card never runs past the slot; the few pixels left are band colour.
  */
-export const bandPx = (columns: number): number => (columns + 5) * 12
+export const CELL_PX = 12
+export const bandPx = (columns: number): number => (columns + 5) * CELL_PX
+
+/** A drawing's width in columns, rounded up, so a row holding one can be measured. */
+export const colsOf = (px: number): number => Math.ceil(px / CELL_PX)
 
 // $ per million tokens: input, and the cache read. The 1-hour cache write is 2 times
 // input. Haiku 5.5 is $0.10 up to 100K tokens and $0.50 above; long sessions use the

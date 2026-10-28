@@ -76,6 +76,8 @@ The card shows how long you've been idle, how many tokens are in the cache, and 
 ### Fits any width
 
 - **Wide:** everything on one row.
+- **Squeezed:** the row shortens rather than clipping — short dot bars, bare
+  percentages — and stays one row.
 - **Half width:** each window stacks into a small block.
 - **Narrow:** the cache moves to its own row.
 - **Terminal:** the same facts as plain text.
