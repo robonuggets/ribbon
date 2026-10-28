@@ -4,9 +4,10 @@ export type Window = { kind: string; percentUsed: number; resetsAt?: string }
 /**
  * The prompt cache as the band last saw it: when the main thread last sent a
  * request (clock milliseconds), how much context the next request re-sends,
- * the model's context window, and the model.
+ * the model's context window, the model, and the cache's length in minutes
+ * (60 or 5) once the transcript has shown it.
  */
-export type CacheFacts = { lastAt: number; tokens: number; window: number; model: string | null }
+export type CacheFacts = { lastAt: number; tokens: number; window: number; model: string | null; ttlMin?: number }
 
 /** Whether the cache card is open, remembered only for the state it was set in. */
 export type Fold = { mode: 'warm' | 'cold'; open: boolean }

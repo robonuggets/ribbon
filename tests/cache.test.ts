@@ -119,3 +119,39 @@ test('a cleared session drops the cache until the next reply', async ($, on) => 
   expect(await band.find({ text: ' 99% left' })).toBeDefined()
   await band.unmount()
 })
+
+const FIVE_MIN_TAIL = [
+  'cut mid-line',
+  JSON.stringify({ type: 'assistant', isSidechain: false, message: { usage: { cache_creation: { ephemeral_5m_input_tokens: 2000, ephemeral_1h_input_tokens: 0 } } } }),
+].join('\n')
+
+test('a session on the 5-minute cache goes cold after 5 minutes and prices the 1.25x write', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: NOW })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 }, rateLimits: WINDOWS } }))
+  on('classic.SessionStart', () => ({}))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: FIVE_MIN_TAIL, stderr: '' } }) as never)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 6 * 60, context_tokens: 770000, model: 'claude-opus-5-5', transcript_path: '/work/t.jsonl' })
+
+  const band = await $.ui.mount({ plugin: 'ribbon', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await band.find({ text: ' COLD ' })).toBeDefined()
+  // Opus 5.5: 770k tokens at the 5-minute write price, 1.25 x $4 per million.
+  expect(await band.find({ text: '$3.85' })).toBeDefined()
+  await band.unmount()
+})
+
+test('with no transcript to read, the cache keeps its 1-hour length', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: NOW })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 }, rateLimits: WINDOWS } }))
+  on('classic.SessionStart', () => ({}))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: 6 * 60, context_tokens: 770000, model: 'claude-opus-5-5' })
+
+  const band = await $.ui.mount({ plugin: 'ribbon', surface: 'terminal', component: 'AbovePrompt', props: PROPS })
+  expect(await band.find({ text: ' 54m left' })).toBeDefined()
+  await band.unmount()
+})

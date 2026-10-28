@@ -22,7 +22,10 @@ export const HUE: Record<Mode, string> = { warm: '#cc6363', cold: '#6aaabd' }
 export const INK = '#1c1a16'
 export const WORD: Record<Mode, string> = { warm: 'WARM', cold: 'COLD' }
 
-/** The prompt cache lives an hour after the last request that read or wrote it. */
+/**
+ * The prompt cache lives 5 minutes or an hour after the last request that read or wrote it,
+ * as the session's requests set it. An hour until the transcript says otherwise.
+ */
 export const TTL_MIN = 60
 export const TTL_MS = TTL_MIN * 60 * 1000
 
@@ -40,8 +43,8 @@ export const kindOf = (columns: number): Kind => (columns >= WIDE_AT ? 'wide' : 
  */
 export const bandPx = (columns: number): number => (columns + 5) * 12
 
-// $ per million tokens: input, and the cache read. The 1-hour cache write is 2 times
-// input. Haiku 5.5 is $0.10 up to 100K tokens and $0.50 above; long sessions use the
+// $ per million tokens: input, and the cache read. A cache write is 2 times input for
+// the 1-hour cache and 1.25 times for the 5-minute one. Haiku 5.5 is $0.10 up to 100K tokens and $0.50 above; long sessions use the
 // higher rate.
 export type Model = { id: string; NAME: string; input: number; read: number }
 export const MODELS: Model[] = [
@@ -57,9 +60,11 @@ export const familyOf = (model: string | null | undefined): string | null => {
   return MODELS.find(x => m.includes(x.id))?.id ?? null
 }
 
-export const coldCost = (m: Model, tokens: number): number => (tokens / 1e6) * m.input * 2
+/** A cache write costs 2 times input for the 1-hour cache, 1.25 times for the 5-minute one. */
+export const coldCost = (m: Model, tokens: number, ttlMin = TTL_MIN): number => (tokens / 1e6) * m.input * (ttlMin >= 60 ? 2 : 1.25)
 export const warmCost = (m: Model, tokens: number): number => (tokens / 1e6) * m.read
-export const costOf = (m: Model, mode: Mode, tokens: number): number => (mode === 'cold' ? coldCost(m, tokens) : warmCost(m, tokens))
+export const costOf = (m: Model, mode: Mode, tokens: number, ttlMin = TTL_MIN): number =>
+  mode === 'cold' ? coldCost(m, tokens, ttlMin) : warmCost(m, tokens)
 export const usd = (n: number): string => '$' + n.toFixed(2)
 export const tok = (n: number): string => (n >= 1e6 ? `${Number((n / 1e6).toFixed(1))}M` : `${Math.round(n / 1000)}k`)
 
@@ -79,6 +84,8 @@ export type CacheView = {
   idle: string
   /** The same in whole minutes, for the warm countdown. */
   idleMin: number
+  /** How long the cache lives, in minutes: 60 or 5. */
+  ttlMin: number
   /** Context the next request re-sends. */
   tokens: number
   /** The model's context window. */
@@ -239,15 +246,15 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       g += `<line x1="${x0}" y1="${ly}" x2="${x0 + 18}" y2="${ly}" stroke="${FIRE}" stroke-width="5" stroke-linecap="round"/>`
       for (let cx = x0 + 30; cx <= x1 - 14; cx += 9) g += `<circle cx="${cx}" cy="${ly}" r="2.2" fill="${ICE}"/>`
       g += `<circle cx="${x1}" cy="${ly}" r="5.5" fill="${ICE}"/>`
-      g += t(x, y + k.cap, 'warm 1h', { size: 12, w: 600, fill: FIRE })
+      g += t(x, y + k.cap, `warm ${v.ttlMin >= 60 ? '1h' : `${v.ttlMin}m`}`, { size: 12, w: 600, fill: FIRE })
       g += t(x1 + 5, y + k.cap, 'cold now', { size: 12, w: 600, fill: ICE, anchor: 'end' })
     } else {
-      const now = x0 + (x1 - x0) * Math.min(1, v.idleMin / TTL_MIN)
+      const now = x0 + (x1 - x0) * Math.min(1, v.idleMin / v.ttlMin)
       g += `<line x1="${x0}" y1="${ly}" x2="${now}" y2="${ly}" stroke="${FIRE}" stroke-width="5" stroke-linecap="round"/>`
       for (let cx = now + 12; cx <= x1 - 12; cx += 9) g += `<circle cx="${cx}" cy="${ly}" r="2.2" fill="${EMPTY}"/>`
       g += `<circle cx="${x1}" cy="${ly}" r="4.5" fill="none" stroke="${ICE}" stroke-width="2"/>`
       g += t(x, y + k.cap, 'last reply', { size: 12, w: 500 })
-      g += t(x1 + 5, y + k.cap, `cold in ${Math.max(0, TTL_MIN - v.idleMin)}m`, { size: 12, w: 600, fill: ICE, anchor: 'end' })
+      g += t(x1 + 5, y + k.cap, `cold in ${Math.max(0, v.ttlMin - v.idleMin)}m`, { size: 12, w: 600, fill: ICE, anchor: 'end' })
     }
     return g
   }
@@ -282,16 +289,16 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       ? { lab: 24, base: 100, rows: 6, step: 7, chip: 58, price: 88, name: 102 }
       : { lab: 30, base: 116, rows: 8, step: 8, chip: 70, price: 104, name: 120 }
     let g = t(x, y + k.lab, cold ? 'NEXT MESSAGE COSTS' : 'NEXT MESSAGE COSTS, CACHED', { ls: 1.4 })
-    const top = Math.max(...MODELS.map(m => coldCost(m, v.tokens)))
+    const top = Math.max(...MODELS.map(m => coldCost(m, v.tokens, v.ttlMin)))
     MODELS.forEach((m, i) => {
       const mine = m.id === v.mine
-      const n = top > 0 ? Math.max(1, Math.round((costOf(m, mode, v.tokens) / top) * k.rows)) : 1
+      const n = top > 0 ? Math.max(1, Math.round((costOf(m, mode, v.tokens, v.ttlMin) / top) * k.rows)) : 1
       const bx = x + i * colW
       for (let r = 0; r < k.rows; r++)
         for (let c = 0; c < 3; c++)
           g += `<circle cx="${bx + 3 + c * 8}" cy="${y + k.base - r * k.step}" r="2.8" fill="${r < n ? (mine ? HUEM : MUTED) : EMPTY}"/>`
       if (mine) g += chipShapes(bx + 30, y + k.chip, 'YOU', HUEM, 10, 0.8).svg
-      g += t(bx + 30, y + k.price, usd(costOf(m, mode, v.tokens)), { size: 17, w: mine ? 700 : 500, fill: mine ? TEXT : MUTED })
+      g += t(bx + 30, y + k.price, usd(costOf(m, mode, v.tokens, v.ttlMin)), { size: 17, w: mine ? 700 : 500, fill: mine ? TEXT : MUTED })
       g += t(bx + 30, y + k.name, m.NAME, { size: 11, w: 700, fill: mine ? HUEM : MUTED, ls: 0.8 })
     })
     return g
@@ -327,6 +334,6 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
   const body = `<rect width="${W}" height="${h}" fill="${BG}"/><g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
   const alt = cold
     ? `Cache cold. Idle ${v.idle}. Next message re-caches ${tok(v.tokens)} tokens.`
-    : `Cache warm. Goes cold in ${Math.max(0, TTL_MIN - v.idleMin)} minutes. ${tok(v.tokens)} tokens cached.`
+    : `Cache warm. Goes cold in ${Math.max(0, v.ttlMin - v.idleMin)} minutes. ${tok(v.tokens)} tokens cached.`
   return { source: svgDoc(W, h, body, true), w: W, h, alt }
 }

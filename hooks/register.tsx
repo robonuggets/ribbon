@@ -3,10 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CacheFacts, Fold, Window } from '../types'
 import {
-  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
+  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, WORD, YELLOW,
   bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
+import { TAIL_BYTES, ttlFromTail } from './ttl'
 
 // A band above the prompt in a warm dark look: card surface, cream text,
 // dot-matrix bars. Shows how much of each usage window is LEFT, 7-day first, then
@@ -58,14 +59,30 @@ const fmtReset = (iso: string | undefined, now: number): string => {
 export const viewOf = (c: CacheFacts | null, now: number): CacheView | null => {
   if (!c || c.lastAt <= 0 || c.tokens <= 0) return null
   const idleMs = Math.max(0, now - c.lastAt)
+  const ttlMin = c.ttlMin ?? TTL_MIN
   return {
-    mode: idleMs >= TTL_MS ? 'cold' : 'warm',
+    mode: idleMs >= ttlMin * 60_000 ? 'cold' : 'warm',
     idle: fmtIdle(idleMs),
     idleMin: Math.floor(idleMs / 60000),
+    ttlMin,
     tokens: c.tokens,
     window: c.window,
     mine: familyOf(c.model),
   }
+}
+
+// Where the session's transcript is: Claude Code hands it to classic hooks.
+let transcript = ''
+
+/** Which cache length the session's last reply wrote, read from the transcript's tail, onto the cache facts. */
+const detectTtl = async ($: EngineInterface): Promise<void> => {
+  if (!transcript) return
+  const r = await $.process.run(['tail', '-c', String(TAIL_BYTES), transcript])
+  if (r.exitCode !== 0) return
+  const found = ttlFromTail(r.stdout)
+  if (found === 'unknown') return
+  const ttlMin = found === '1h' ? 60 : 5
+  await update($, cache, c => (c ? { ...c, ttlMin } : c))
 }
 
 const pull = async ($: EngineInterface): Promise<void> => {
@@ -78,6 +95,7 @@ const measure = async ($: EngineInterface, lastAt: number | null, model: string 
   const u = await $.session.usage()
   const m = model ?? (await $.session.model())
   await update($, cache, c => ({
+    ...c,
     lastAt: lastAt ?? c?.lastAt ?? 0,
     tokens: u.context.tokens && u.context.tokens > 0 ? u.context.tokens : (c?.tokens ?? 0),
     window: u.context.window || c?.window || 0,
@@ -104,8 +122,14 @@ export const register: Register = on => {
   })
 
   // A resumed or forked session knows how long it was away and how big it is.
+  on('classic.Stop', async ($, e, next) => {
+    if (typeof e.transcript_path === 'string' && e.transcript_path) transcript = e.transcript_path
+    return next(e)
+  })
+
   on('classic.SessionStart', async ($, e, next) => {
     const r = await next(e)
+    if (typeof e.transcript_path === 'string' && e.transcript_path) transcript = e.transcript_path
     if (e.source === 'clear' || e.source === 'compact') {
       await update($, cache, () => null)
       await update($, fold, () => null)
@@ -116,6 +140,7 @@ export const register: Register = on => {
       const model = typeof e.model === 'string' ? e.model : await $.session.model()
       const tokens = typeof e.context_tokens === 'number' ? e.context_tokens : 0
       await update($, cache, () => ({ lastAt, tokens, window, model }))
+      await detectTtl($).catch(() => undefined)
     }
     return r
   }).catch(($, e, next) => next(e)) // a band that fails to seed never holds up the session
@@ -137,6 +162,7 @@ export const register: Register = on => {
     // turn.step stamps the exact request time; when no step of this turn did, the turn's end is the floor.
     const lastAt = !c || now - c.lastAt > e.durationMs ? now : c.lastAt
     await measure($, lastAt, e.usage?.model ?? null)
+    await detectTtl($).catch(() => undefined)
     return r
   })
 
@@ -254,9 +280,9 @@ export const register: Register = on => {
       ? [
           <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
           mine ? <Text key="dot" color={MUTED}> · </Text> : null,
-          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
+          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens, view.ttlMin))}</Text> : null,
         ]
-      : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
+      : [<Text key="left" color={hue} bold>{` ${Math.max(0, view.ttlMin - view.idleMin)}m left`}</Text>]
 
     const button = Svg ? (
       <Box key="fold" flexShrink={0} alignItems="flex-start">
@@ -290,10 +316,10 @@ export const register: Register = on => {
           {open ? null : (
             <Box key="block" flexDirection="column" flexShrink={0} marginRight={2}>
               <Box flexDirection="row" alignItems="center">{badge}</Box>
-              <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
+              <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, view.ttlMin - view.idleMin)}m left`}</Text>
               {mine ? (
                 <Box flexDirection="row">
-                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
+                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens, view.ttlMin))}</Text>
                   <Text color={MUTED}> next</Text>
                 </Box>
               ) : null}
