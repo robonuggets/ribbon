@@ -1,11 +1,20 @@
 {
   "name": "ribbon",
   "version": "1.0.0",
-  "description": "A slim band above the prompt: how much of your 5-hour and 7-day usage is left, when each resets, and whether the prompt cache is warm or cold with what the next message costs.",
+  "description": "A slim band above the prompt: how much of your 5-hour and 7-day usage is left, when each resets, how much of the context window is left, and whether the prompt cache is warm or cold with what the next message costs.",
   "author": { "name": "Jay E", "url": "https://robonuggets.com" },
   "homepage": "https://github.com/robonuggets/ribbon",
   "repository": "https://github.com/robonuggets/ribbon",
   "license": "MIT",
   "keywords": ["usage", "rate-limit", "prompt-cache", "cost", "status", "mod", "claude-code"],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "agentsView": {
+      "type": "string",
+      "title": "Agents view",
+      "description": "on adds a ⇄ button that swaps the band for a subagents progress bar, with a live agents panel (/agents-info)",
+      "default": "off",
+      "options": ["off", "on"]
+    }
+  }
 }

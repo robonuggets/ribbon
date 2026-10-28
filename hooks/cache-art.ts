@@ -1,6 +1,8 @@
 // The cache card's drawings. Pure: each function returns an SVG string the band
 // hands to Svg. Nothing here touches the engine.
 
+import type { ThemeKey } from 'claude-code'
+
 import { SANS } from './font'
 
 export type Mode = 'warm' | 'cold'
@@ -14,12 +16,20 @@ export const EMPTY = '#4a463b'
 export const LINE = '#36332b'
 export const ORANGE = '#ff6b1a'
 export const YELLOW = '#f5a623'
+export const VIOLET = '#8f8cf4'
 
 // The cache's two states in a muted shade: desaturated so they sit
 // beside the band's own orange and yellow.
 export const HUE: Record<Mode, string> = { warm: '#cc6363', cold: '#6aaabd' }
 /** Text on a filled chip. */
 export const INK = '#1c1a16'
+
+// The same roles for a Text, by theme key, so the terminal and the desktop's
+// light mode pick colours that read on their own background.
+export const T_TEXT: ThemeKey = 'text'
+export const T_MUTED: ThemeKey = 'inactive'
+export const T_EMPTY: ThemeKey = 'subtle'
+export const T_HUE: Record<Mode, ThemeKey> = { warm: 'error', cold: 'suggestion' }
 export const WORD: Record<Mode, string> = { warm: 'WARM', cold: 'COLD' }
 
 /** The prompt cache lives an hour after the last request that read or wrote it. */
@@ -90,8 +100,28 @@ export type CacheView = {
 export const mineModel = (v: CacheView): Model | undefined => MODELS.find(m => m.id === v.mine)
 
 // ---------- SVG helpers ----------
+// The palette above is drawn for a dark app. In a light one each drawing swaps
+// it for a paper-toned twin: CSS outranks the fill attributes, so the drawing
+// code keeps naming the dark colours and the swap lives here alone.
+const LIGHT: Record<string, string> = {
+  [BG]: '#f3f0e8',
+  [TEXT]: '#2b2924',
+  [MUTED]: '#75705f',
+  [EMPTY]: '#dcd7ca',
+  [LINE]: '#e2ded3',
+  [YELLOW]: '#d18a00',
+  [VIOLET]: '#5b57c9',
+  '#6aaabd': '#3d86a0',
+  '#6b6656': '#b5af9f',
+}
+const LIGHT_CSS =
+  '<style>@media (prefers-color-scheme: light){' +
+  Object.entries(LIGHT).map(([d, l]) => `[fill="${d}"]{fill:${l}}[stroke="${d}"]{stroke:${l}}`).join('') +
+  '}</style>'
+
 export const svgDoc = (w: number, h: number, body: string, font: boolean): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+  LIGHT_CSS +
   (font
     ? `<style>@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}</style>`
     : '') +
