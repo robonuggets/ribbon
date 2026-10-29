@@ -9,7 +9,7 @@ const PROPS = {
   hasSurvey: false,
   isWorking: false,
   maxRows: 4,
-  bodyColumns: 100,
+  bodyColumns: 110,
   scroll: { offset: 0, bodyRows: 4 },
   view: {},
 } as const
