@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CacheFacts, Fold, Window } from '../types'
 import {
-  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
+  BG, CHIP_SMALL, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SMALL, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
   bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
@@ -148,6 +148,9 @@ export const register: Register = on => {
     // Svg draws on desktop, mobile and VS Code; the terminal gets the text form.
     // Ask the surface, not the table: the terminal's table still lists Svg.
     const Svg = e.surface !== 'terminal' && 'Svg' in ui ? ui.Svg : null
+    // Drawing surfaces set the band in caption text, the smallest step, so the row and the cache fit
+    // where the body size would clip them; the terminal has one size and ignores it.
+    const size = Svg ? ('caption' as const) : undefined
     const list = await read($, windows)
     const now = await $.clock.now()
     const view = viewOf(await read($, cache), now)
@@ -155,13 +158,13 @@ export const register: Register = on => {
     if (list.length === 0 && !view) {
       return (
         <Box backgroundColor={BG} paddingX={1}>
-          <Text color={MUTED}>USAGE · waiting for the first reply</Text>
+          <Text size={size} color={MUTED}>USAGE · waiting for the first reply</Text>
         </Box>
       )
     }
 
     const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
-    const kind = kindOf(columns)
+    const kind = kindOf(columns, view !== null && Svg === null)
     const isWide = kind === 'wide'
     const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
 
@@ -182,12 +185,12 @@ export const register: Register = on => {
       const p = parts(w)
       return (
         <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
-          <Text color={MUTED} bold>{p.name} </Text>
-          <Text color={p.col}>{p.d.on}</Text>
-          <Text color={EMPTY}>{p.d.off}</Text>
-          <Text color={p.col} bold> {p.left}% left</Text>
-          {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
-          {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
+          <Text size={size} color={MUTED} bold>{p.name} </Text>
+          <Text size={size} color={p.col}>{p.d.on}</Text>
+          <Text size={size} color={EMPTY}>{p.d.off}</Text>
+          <Text size={size} color={p.col} bold> {p.left}% left</Text>
+          {p.left < LOW_AT ? <Text size={size} color={TEXT} bold> LOW</Text> : null}
+          {p.reset ? <Text size={size} color={MUTED}> · {p.reset}</Text> : null}
         </Box>
       )
     }
@@ -197,27 +200,27 @@ export const register: Register = on => {
       return (
         <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={3}>
           <Box flexDirection="row">
-            <Text color={MUTED} bold>{p.name} </Text>
-            <Text color={p.col}>{p.d.on}</Text>
-            <Text color={EMPTY}>{p.d.off}</Text>
+            <Text size={size} color={MUTED} bold>{p.name} </Text>
+            <Text size={size} color={p.col}>{p.d.on}</Text>
+            <Text size={size} color={EMPTY}>{p.d.off}</Text>
           </Box>
           <Box flexDirection="row">
-            <Text color={p.col} bold>{p.left}% left</Text>
-            {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
+            <Text size={size} color={p.col} bold>{p.left}% left</Text>
+            {p.left < LOW_AT ? <Text size={size} color={TEXT} bold> LOW</Text> : null}
           </Box>
-          {p.reset ? <Text color={MUTED}>resets {p.reset}</Text> : null}
+          {p.reset ? <Text size={size} color={MUTED}>resets {p.reset}</Text> : null}
         </Box>
       )
     }
 
     const label = (
       <Box key="label" flexShrink={0} marginRight={isWide ? 2 : 3}>
-        <Text color={TEXT} bold>USAGE</Text>
+        <Text size={size} color={TEXT} bold>USAGE</Text>
       </Box>
     )
     const usage = list.length > 0
       ? list.map(isWide ? wide : stacked)
-      : [<Box key="wait" flexShrink={0} marginRight={3}><Text color={MUTED}>waiting for the first reply</Text></Box>]
+      : [<Box key="wait" flexShrink={0} marginRight={3}><Text size={size} color={MUTED}>waiting for the first reply</Text></Box>]
 
     // Before the first reply there is no cache to show: today's band, as it was.
     if (!view) {
@@ -241,22 +244,22 @@ export const register: Register = on => {
 
     const badge = Svg
       ? [
-          <Svg key="robo" source={roboSvg(mode)} alt={cold ? 'Robo, frozen' : 'Robo, bobbing'} width={ROBO_SIZE} height={ROBO_SIZE} isInteractive />,
-          <Text key="gap"> </Text>,
+          <Svg key="robo" source={roboSvg(mode, ROBO_SMALL)} alt={cold ? 'Robo, frozen' : 'Robo, bobbing'} width={ROBO_SMALL} height={ROBO_SMALL} isInteractive />,
+          <Text size={size} key="gap"> </Text>,
           (() => {
-            const c = chipSvg(mode)
+            const c = chipSvg(mode, CHIP_SMALL)
             return <Svg key="chip" source={c.source} alt={WORD[mode]} width={c.w} height={c.h} />
           })(),
         ]
-      : [<Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
+      : [<Text size={size} key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
 
     const summary = cold
       ? [
-          <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
-          mine ? <Text key="dot" color={MUTED}> · </Text> : null,
-          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
+          <Text size={size} key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
+          mine ? <Text size={size} key="dot" color={MUTED}> · </Text> : null,
+          mine ? <Text size={size} key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
         ]
-      : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
+      : [<Text size={size} key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
 
     const button = Svg ? (
       <Box key="fold" flexShrink={0} alignItems="flex-start">
@@ -290,11 +293,11 @@ export const register: Register = on => {
           {open ? null : (
             <Box key="block" flexDirection="column" flexShrink={0} marginRight={2}>
               <Box flexDirection="row" alignItems="center">{badge}</Box>
-              <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
+              <Text size={size} color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
               {mine ? (
                 <Box flexDirection="row">
-                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
-                  <Text color={MUTED}> next</Text>
+                  <Text size={size} color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
+                  <Text size={size} color={MUTED}> next</Text>
                 </Box>
               ) : null}
             </Box>

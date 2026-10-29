@@ -28,10 +28,18 @@ export const TTL_MS = TTL_MIN * 60 * 1000
 
 /** One row needs about 78 columns for two windows; under that, each window stacks. */
 export const WIDE_AT = 78
+/**
+ * In the terminal, with the cache shown, the same row also carries the chip, the
+ * minutes left or the idle time and price: about 30 columns more. The terminal
+ * has one text size, so the row needs the room. Drawing surfaces shrink the
+ * band's text and drawings instead and keep WIDE_AT.
+ */
+export const WIDE_CACHE_AT = 112
 /** Under this the dot bars shrink and the cache gets its own row. */
 export const TIGHT_AT = 42
 
-export const kindOf = (columns: number): Kind => (columns >= WIDE_AT ? 'wide' : columns >= TIGHT_AT ? 'stacked' : 'tight')
+export const kindOf = (columns: number, withCache = false): Kind =>
+  columns >= (withCache ? WIDE_CACHE_AT : WIDE_AT) ? 'wide' : columns >= TIGHT_AT ? 'stacked' : 'tight'
 
 /**
  * The band's width in CSS pixels for a column count: the engine keeps 5 cells
@@ -123,8 +131,8 @@ export const chipShapes = (x: number, y: number, word: string, fill: string, siz
 }
 
 /** The WARM or COLD chip beside Robo in the band's row. */
-export const chipSvg = (mode: Mode): { source: string; w: number; h: number } => {
-  const c = chipShapes(0, 0, WORD[mode], HUE[mode], 13, 1)
+export const chipSvg = (mode: Mode, size = 13): { source: string; w: number; h: number } => {
+  const c = chipShapes(0, 0, WORD[mode], HUE[mode], size, 1)
   return { source: svgDoc(c.w, c.h, c.svg, true), w: c.w, h: c.h }
 }
 
@@ -200,7 +208,11 @@ export const roboShapes = (x: number, y: number, size: number, mode: Mode): stri
 
 /** Robo beside the chip in the band's row. */
 export const ROBO_SIZE = 26
-export const roboSvg = (mode: Mode): string => svgDoc(ROBO_SIZE, ROBO_SIZE, roboShapes(0, 0, ROBO_SIZE, mode), false)
+/** Robo beside the caption-size text of the band's row. */
+export const ROBO_SMALL = 18
+/** The chip's font size beside the caption-size text of the band's row. */
+export const CHIP_SMALL = 11
+export const roboSvg = (mode: Mode, size = ROBO_SIZE): string => svgDoc(size, size, roboShapes(0, 0, size, mode), false)
 
 // ---------- The card, laid out for the band's width ----------
 type TextOpts = { size?: number; w?: number; fill?: string; ls?: number; anchor?: string }
