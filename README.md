@@ -80,6 +80,12 @@ The card shows how long you've been idle, how many tokens are in the cache, and 
 - **Narrow:** the cache moves to its own row.
 - **Terminal:** the same facts as plain text.
 
+With the cache showing, one row needs about 112 columns; below that the windows stack so the right end is never clipped.
+
+### Light and dark
+
+The band has no background of its own and uses the app's text colour, so it sits on whatever surface the app draws. The cache drawings (Robo, the chips and the card) switch between a light and a dark palette with the system colour scheme (`prefers-color-scheme`). The orange, yellow, red and blue accents are mid-tones that read on both.
+
 ## Good to know
 
 - **It costs nothing to run.** It reads the app's own numbers and draws them. It never calls a model.

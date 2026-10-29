@@ -9,10 +9,13 @@ export type Window = { kind: string; percentUsed: number; resetsAt?: string }
 export type CacheFacts = { lastAt: number; tokens: number; window: number; model: string | null }
 
 /** Whether the cache card is open, remembered only for the state it was set in. */
+/** What the cache-tax mod's `$.cacheTax.status()` gave, when that mod is installed: the keepwarm line the band shows. */
+export type Keepwarm = { state: 'on' | 'off' | 'stopped'; leftMs: number }
+
 export type Fold = { mode: 'warm' | 'cold'; open: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
-    'ribbon': { windows: Window[]; cache: CacheFacts | null; fold: Fold | null }
+    'ribbon': { windows: Window[]; cache: CacheFacts | null; fold: Fold | null; keepwarm: Keepwarm | null }
   }
 }

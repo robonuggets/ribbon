@@ -6,14 +6,16 @@ import { SANS } from './font'
 export type Mode = 'warm' | 'cold'
 export type Kind = 'wide' | 'stacked' | 'tight'
 
-// The band's own colours, measured from the app.
-export const BG = '#24221c'
-export const TEXT = '#e8e2d2'
-export const MUTED = '#8d8775'
-export const EMPTY = '#4a463b'
-export const LINE = '#36332b'
-export const ORANGE = '#ff6b1a'
-export const YELLOW = '#f5a623'
+// Neutrals are CSS variables that svgDoc defines: light by default, dark under
+// prefers-color-scheme, so the drawings follow the app and system theme. The band's own
+// text takes the app's text colour (dimColor for the muted parts) and has no background.
+export const TEXT = 'var(--rb-text)'
+export const MUTED = 'var(--rb-muted)'
+export const EMPTY = 'var(--rb-empty)'
+export const LINE = 'var(--rb-line)'
+// Mid-tones: readable on a light surface and on a dark one.
+export const ORANGE = '#ef6a16'
+export const YELLOW = '#e19a12'
 
 // The cache's two states in a muted shade: desaturated so they sit
 // beside the band's own orange and yellow.
@@ -26,12 +28,23 @@ export const WORD: Record<Mode, string> = { warm: 'WARM', cold: 'COLD' }
 export const TTL_MIN = 60
 export const TTL_MS = TTL_MIN * 60 * 1000
 
-/** One row needs about 78 columns for two windows; under that, each window stacks. */
+/** The card's layout: it needs about 78 columns for two windows; under that, each window stacks. */
 export const WIDE_AT = 78
 /** Under this the dot bars shrink and the cache gets its own row. */
 export const TIGHT_AT = 42
 
 export const kindOf = (columns: number): Kind => (columns >= WIDE_AT ? 'wide' : columns >= TIGHT_AT ? 'stacked' : 'tight')
+
+/**
+ * The row's layout. With the cache badge, its summary and the Show button on the same
+ * row, one row needs about 112 columns, not 78: a narrower band clips the right end, so
+ * it stacks instead.
+ */
+export const WIDE_ROW_AT = 112
+export const rowKindOf = (columns: number, hasCache: boolean): Kind => {
+  const kind = kindOf(columns)
+  return hasCache && kind === 'wide' && columns < WIDE_ROW_AT ? 'stacked' : kind
+}
 
 /**
  * The band's width in CSS pixels for a column count: the engine keeps 5 cells
@@ -90,11 +103,17 @@ export type CacheView = {
 export const mineModel = (v: CacheView): Model | undefined => MODELS.find(m => m.id === v.mine)
 
 // ---------- SVG helpers ----------
+const THEME =
+  'svg{--rb-text:#2a2721;--rb-muted:#6f695b;--rb-empty:#d9d4c6;--rb-line:#e4e0d4}' +
+  '@media (prefers-color-scheme:dark){svg{--rb-text:#e8e2d2;--rb-muted:#8d8775;--rb-empty:#4a463b;--rb-line:#36332b}}'
+
 export const svgDoc = (w: number, h: number, body: string, font: boolean): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+  `<style>${THEME}` +
   (font
-    ? `<style>@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}</style>`
+    ? `@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}`
     : '') +
+  '</style>' +
   body +
   '</svg>'
 
@@ -324,7 +343,7 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       zoneCost(13, 182, (W - 26) / 4, { compact: true })
   }
   const h = H + CARD_TOP
-  const body = `<rect width="${W}" height="${h}" fill="${BG}"/><g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
+  const body = `<g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
   const alt = cold
     ? `Cache cold. Idle ${v.idle}. Next message re-caches ${tok(v.tokens)} tokens.`
     : `Cache warm. Goes cold in ${Math.max(0, TTL_MIN - v.idleMin)} minutes. ${tok(v.tokens)} tokens cached.`
