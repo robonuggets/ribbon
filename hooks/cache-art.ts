@@ -28,10 +28,19 @@ export const TTL_MS = TTL_MIN * 60 * 1000
 
 /** One row needs about 78 columns for two windows; under that, each window stacks. */
 export const WIDE_AT = 78
+/**
+ * With the cache shown the same row also carries the chip, the minutes left or
+ * the idle time and price, and the Show button: about 30 columns more at the
+ * terminal's (or the body text's) size. Caption text keeps WIDE_AT; footnote
+ * text sits between the two.
+ */
+export const WIDE_CACHE_AT = 112
+export const WIDE_FOOTNOTE_AT = 96
 /** Under this the dot bars shrink and the cache gets its own row. */
 export const TIGHT_AT = 42
 
-export const kindOf = (columns: number): Kind => (columns >= WIDE_AT ? 'wide' : columns >= TIGHT_AT ? 'stacked' : 'tight')
+export const kindOf = (columns: number, wideAt = WIDE_AT): Kind =>
+  columns >= wideAt ? 'wide' : columns >= TIGHT_AT ? 'stacked' : 'tight'
 
 /**
  * The band's width in CSS pixels for a column count: the engine keeps 5 cells
@@ -123,8 +132,8 @@ export const chipShapes = (x: number, y: number, word: string, fill: string, siz
 }
 
 /** The WARM or COLD chip beside Robo in the band's row. */
-export const chipSvg = (mode: Mode): { source: string; w: number; h: number } => {
-  const c = chipShapes(0, 0, WORD[mode], HUE[mode], 13, 1)
+export const chipSvg = (mode: Mode, size = 13): { source: string; w: number; h: number } => {
+  const c = chipShapes(0, 0, WORD[mode], HUE[mode], size, 1)
   return { source: svgDoc(c.w, c.h, c.svg, true), w: c.w, h: c.h }
 }
 
@@ -200,7 +209,11 @@ export const roboShapes = (x: number, y: number, size: number, mode: Mode): stri
 
 /** Robo beside the chip in the band's row. */
 export const ROBO_SIZE = 26
-export const roboSvg = (mode: Mode): string => svgDoc(ROBO_SIZE, ROBO_SIZE, roboShapes(0, 0, ROBO_SIZE, mode), false)
+/** Robo beside the caption-size text of the band's row. */
+export const ROBO_SMALL = 18
+/** The chip's font size beside the caption-size text of the band's row. */
+export const CHIP_SMALL = 11
+export const roboSvg = (mode: Mode, size = ROBO_SIZE): string => svgDoc(size, size, roboShapes(0, 0, size, mode), false)
 
 // ---------- The card, laid out for the band's width ----------
 type TextOpts = { size?: number; w?: number; fill?: string; ls?: number; anchor?: string }
@@ -208,7 +221,23 @@ type TextOpts = { size?: number; w?: number; fill?: string; ls?: number; anchor?
 /** The gap between the row and the card, drawn inside the card. */
 const CARD_TOP = 6
 
-export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; w: number; h: number; alt: string } => {
+// theme: app. The card draws no background, so its ink follows the light or dark colour scheme:
+// a drawing can't read the app's theme keys, only the scheme of the page it sits on.
+const SCHEME: [string, string, string][] = [
+  // dark, light, class
+  [TEXT, '#2b2925', 't'],
+  [MUTED, '#6f6a5d', 'm'],
+  [EMPTY, '#cfcabd', 'e'],
+  [LINE, '#ddd8cc', 'l'],
+]
+const schemed = (body: string): string => {
+  let s = body
+  for (const [dark, , c] of SCHEME) s = s.split(`fill="${dark}"`).join(`class="i${c}"`)
+  const fills = (k: 0 | 1) => SCHEME.map(r => `.i${r[2]}{fill:${r[k]}}`).join('')
+  return `<style>${fills(0)}@media (prefers-color-scheme: light){${fills(1)}}</style>` + s
+}
+
+export const cardSvg = (v: CacheView, kind: Kind, W: number, clear = false): { source: string; w: number; h: number; alt: string } => {
   const mode = v.mode
   const cold = mode === 'cold'
   const HUEM = HUE[mode]
@@ -324,7 +353,8 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       zoneCost(13, 182, (W - 26) / 4, { compact: true })
   }
   const h = H + CARD_TOP
-  const body = `<rect width="${W}" height="${h}" fill="${BG}"/><g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
+  const drawn = `<g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
+  const body = clear ? schemed(drawn) : `<rect width="${W}" height="${h}" fill="${BG}"/>` + drawn
   const alt = cold
     ? `Cache cold. Idle ${v.idle}. Next message re-caches ${tok(v.tokens)} tokens.`
     : `Cache warm. Goes cold in ${Math.max(0, TTL_MIN - v.idleMin)} minutes. ${tok(v.tokens)} tokens cached.`

@@ -7,5 +7,91 @@
   "repository": "https://github.com/robonuggets/ribbon",
   "license": "MIT",
   "keywords": ["usage", "rate-limit", "prompt-cache", "cost", "status", "mod", "claude-code"],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "usage": {
+      "type": "string",
+      "title": "Usage figure",
+      "description": "left shows how much of each window is left; used shows how much is spent, as Claude Code's own rate-limit figures do",
+      "default": "left",
+      "options": ["left", "used"]
+    },
+    "first": {
+      "type": "string",
+      "title": "First window",
+      "description": "Which usage window the band shows first: 7d (the weekly one) or 5h (the 5-hour one)",
+      "default": "7d",
+      "options": ["7d", "5h"]
+    },
+    "label": {
+      "type": "string",
+      "title": "USAGE label",
+      "description": "shown puts the word USAGE at the start of the band; hidden leaves just the windows",
+      "default": "shown",
+      "options": ["shown", "hidden"]
+    },
+    "colors": {
+      "type": "string",
+      "title": "Window colours",
+      "description": "fixed draws 7D orange and 5H yellow; level colours each window by the share used: green under 50%, yellow from 50%, red from 80%",
+      "default": "fixed",
+      "options": ["fixed", "level"]
+    },
+    "dots": {
+      "type": "string",
+      "title": "Dots",
+      "description": "mixed draws used cells as large dots and the rest as small ones; even draws all ten as the same small bullet, solid as the same large dot, the unused ones grey",
+      "default": "mixed",
+      "options": ["mixed", "even", "solid"]
+    },
+    "context": {
+      "type": "string",
+      "title": "Context",
+      "description": "shown adds a CTX bar first, the share of the context window in use, drawn like the usage windows",
+      "default": "hidden",
+      "options": ["hidden", "shown"]
+    },
+    "words": {
+      "type": "string",
+      "title": "Words",
+      "description": "shown writes 42% left and resets 4h 0m; hidden writes just 42% and 4h 0m, which leaves more room on one row",
+      "default": "shown",
+      "options": ["shown", "hidden"]
+    },
+    "cells": {
+      "type": "string",
+      "title": "Dots per bar",
+      "description": "10 dots, one per 10%, or 5 dots, one per 20%, for a shorter row",
+      "default": "10",
+      "options": ["10", "5"]
+    },
+    "align": {
+      "type": "string",
+      "title": "Layout",
+      "description": "packed keeps the blocks together at the left; spread spaces them evenly so the band fills its width",
+      "default": "packed",
+      "options": ["packed", "spread"]
+    },
+    "theme": {
+      "type": "string",
+      "title": "Theme",
+      "description": "fixed draws the band on its own warm dark card; app drops the card and draws in your Claude Code theme's colours, so it reads on a light theme too",
+      "default": "fixed",
+      "options": ["fixed", "app"]
+    },
+    "valign": {
+      "type": "string",
+      "title": "Vertical alignment",
+      "description": "How blocks of different heights sit on the row: top, center or bottom",
+      "default": "top",
+      "options": ["top", "center", "bottom"]
+    },
+    "textSize": {
+      "type": "string",
+      "title": "Text size",
+      "description": "The band's text size on desktop, VS Code and mobile; the terminal has one size and ignores it. Larger sizes stack the band sooner so nothing clips",
+      "default": "caption",
+      "options": ["caption", "footnote", "body"]
+    }
+  }
 }

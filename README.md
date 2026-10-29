@@ -80,6 +80,23 @@ The card shows how long you've been idle, how many tokens are in the cache, and 
 - **Narrow:** the cache moves to its own row.
 - **Terminal:** the same facts as plain text.
 
+## Settings
+
+Open `/config` and find **ribbon**, or run `claude plugin configure ribbon@robonuggets`.
+
+- **Usage figure** (`usage`): `left` (default) shows how much of each window is left. `used` shows how much is spent, the way Claude Code's own rate-limit figures count it; the dot bar then fills with what is used. **LOW** still shows when less than 15% is left.
+- **First window** (`first`): `7d` (default) or `5h`. Which window the band shows first.
+- **USAGE label** (`label`): `shown` (default) or `hidden`. Hidden drops the word USAGE and leaves just the windows.
+- **Window colours** (`colors`): `fixed` (default) draws 7D orange and 5H yellow. `level` colours each window by the share used, like a traffic-light status line: green under 50%, yellow from 50%, red from 80%.
+- **Dots** (`dots`): `mixed` (default) draws the used cells as large dots and the rest as small ones. `even` draws all ten as the same small bullet, `solid` as the same large dot; the unused ones are grey.
+- **Context** (`context`): `hidden` (default) or `shown`. Shown adds a CTX bar first: the share of the context window in use, drawn like the usage windows.
+- **Words** (`words`): `shown` (default) or `hidden`. Hidden writes just `42%` and `4h 0m`, without `left`/`used` and `resets`, which leaves more room on one row.
+- **Dots per bar** (`cells`): `10` (default), one per 10%, or `5`, one per 20%, for a shorter row.
+- **Layout** (`align`): `packed` (default) keeps the blocks together at the left, with Show at the right. `spread` spaces the blocks evenly so the band fills its width.
+- **Vertical alignment** (`valign`): `top` (default), `center` or `bottom`: where blocks of different heights (the stacked windows, the cache, Show) sit on the row.
+- **Theme** (`theme`): `fixed` (default) draws the band on its own warm dark card. `app` drops the card and takes your Claude Code theme's colours (text, subtle, claude, warning, and success / warning / error for level colours), so the band reads on a light theme too. The cache card's drawing has no background then and follows the light or dark colour scheme.
+- **Text size** (`textSize`): `caption` (default), `footnote` or `body`. Desktop, VS Code and mobile only; the terminal has one size. Larger sizes stack the band at a wider width so nothing clips.
+
 ## Good to know
 
 - **It costs nothing to run.** It reads the app's own numbers and draws them. It never calls a model.
