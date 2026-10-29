@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { cardSvg, chipSvg, roboSvg } from '../hooks/cache-art'
+
 const NOW = Date.parse('2098-12-31T22:00:00Z')
 const WINDOWS = [
   { kind: 'five_hour', percentUsed: 18, resetsAt: '2099-01-01T01:29:00Z' },
@@ -9,7 +11,7 @@ const PROPS = {
   hasSurvey: false,
   isWorking: false,
   maxRows: 12,
-  bodyColumns: 80,
+  bodyColumns: 120,
   scroll: { offset: 0, bodyRows: 12 },
   view: {},
 } as const
@@ -52,8 +54,8 @@ test('a cold cache opens the card with the re-cache price, and Hide folds it to 
   const card = await band.find({ key: 'card' })
   expect(card).toBeDefined()
   expect(JSON.stringify(card)).toContain('Cache cold. Idle 3d 9h. Next message re-caches 770k tokens.')
-  // The page's width: 80 columns is a 1020 px band.
-  expect(JSON.stringify(card)).toContain('width=\\"1020\\"')
+  // The page's width: 120 columns is a 1500 px band.
+  expect(JSON.stringify(card)).toContain('width=\\"1500\\"')
 
   await band.press({ key: 'cache-fold' })
   expect(await band.find({ key: 'card' })).toBeUndefined()
@@ -118,4 +120,16 @@ test('a cleared session drops the cache until the next reply', async ($, on) => 
   expect(await band.findAll({ type: 'Svg' })).toEqual([])
   expect(await band.find({ text: ' 99% left' })).toBeDefined()
   await band.unmount()
+})
+
+test('the cache drawings define light and dark neutrals and carry no fixed background', async ($, on) => {
+  const view = { mode: 'cold' as const, idle: '3d 9h', idleMin: 4900, tokens: 300000, window: 1000000, mine: 'opus' }
+  for (const kind of ['wide', 'stacked', 'tight'] as const) {
+    const { source } = cardSvg(view, kind, 1200)
+    expect(source).toContain('prefers-color-scheme:dark')
+    expect(source).not.toContain('#24221c')
+    expect(source).not.toMatch(/<rect width="\d+" height="\d+" fill=/)
+  }
+  expect(chipSvg('warm').source).toContain('prefers-color-scheme:dark')
+  expect(roboSvg('cold')).toContain('<style>')
 })

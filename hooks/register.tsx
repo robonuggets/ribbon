@@ -3,8 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CacheFacts, Fold, Window } from '../types'
 import {
-  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
-  bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
+  HUE, INK, ORANGE, ROBO_SIZE, TTL_MIN, TTL_MS, WORD, YELLOW,
+  bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, rowKindOf, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
 
@@ -30,7 +30,7 @@ const fold = atom({ plugin: 'ribbon', key: 'fold' } as const, null as Fold | nul
 
 const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H', spend_limit: 'SPEND' }
 const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1 }
-const COLORS: Record<string, string> = { seven_day: ORANGE, five_hour: YELLOW }
+const COLORS: Record<string, string | undefined> = { seven_day: ORANGE, five_hour: YELLOW }
 
 const clean = (list: readonly Window[]): Window[] =>
   list
@@ -154,22 +154,24 @@ export const register: Register = on => {
 
     if (list.length === 0 && !view) {
       return (
-        <Box backgroundColor={BG} paddingX={1}>
-          <Text color={MUTED}>USAGE · waiting for the first reply</Text>
+        <Box paddingX={1}>
+          <Text dimColor>USAGE · waiting for the first reply</Text>
         </Box>
       )
     }
 
     const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
+    // The card's layout follows the band's width; the row's also counts the cache block it carries.
     const kind = kindOf(columns)
-    const isWide = kind === 'wide'
-    const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
+    const layout = rowKindOf(columns, view !== null)
+    const isWide = layout === 'wide'
+    const cells = layout === 'tight' ? TIGHT_CELLS : CELLS
 
     const parts = (w: Window) => {
       const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
       return {
         left,
-        col: COLORS[w.kind] ?? TEXT,
+        col: COLORS[w.kind],
         name: NAMES[w.kind] ?? w.kind.toUpperCase(),
         d: dots(left, cells),
         reset: fmtReset(w.resetsAt, now),
@@ -182,12 +184,12 @@ export const register: Register = on => {
       const p = parts(w)
       return (
         <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
-          <Text color={MUTED} bold>{p.name} </Text>
+          <Text dimColor bold>{p.name} </Text>
           <Text color={p.col}>{p.d.on}</Text>
-          <Text color={EMPTY}>{p.d.off}</Text>
+          <Text dimColor>{p.d.off}</Text>
           <Text color={p.col} bold> {p.left}% left</Text>
-          {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
-          {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
+          {p.left < LOW_AT ? <Text bold> LOW</Text> : null}
+          {p.reset ? <Text dimColor> · {p.reset}</Text> : null}
         </Box>
       )
     }
@@ -197,32 +199,32 @@ export const register: Register = on => {
       return (
         <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={3}>
           <Box flexDirection="row">
-            <Text color={MUTED} bold>{p.name} </Text>
+            <Text dimColor bold>{p.name} </Text>
             <Text color={p.col}>{p.d.on}</Text>
-            <Text color={EMPTY}>{p.d.off}</Text>
+            <Text dimColor>{p.d.off}</Text>
           </Box>
           <Box flexDirection="row">
             <Text color={p.col} bold>{p.left}% left</Text>
-            {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
+            {p.left < LOW_AT ? <Text bold> LOW</Text> : null}
           </Box>
-          {p.reset ? <Text color={MUTED}>resets {p.reset}</Text> : null}
+          {p.reset ? <Text dimColor>resets {p.reset}</Text> : null}
         </Box>
       )
     }
 
     const label = (
       <Box key="label" flexShrink={0} marginRight={isWide ? 2 : 3}>
-        <Text color={TEXT} bold>USAGE</Text>
+        <Text bold>USAGE</Text>
       </Box>
     )
     const usage = list.length > 0
       ? list.map(isWide ? wide : stacked)
-      : [<Box key="wait" flexShrink={0} marginRight={3}><Text color={MUTED}>waiting for the first reply</Text></Box>]
+      : [<Box key="wait" flexShrink={0} marginRight={3}><Text dimColor>waiting for the first reply</Text></Box>]
 
     // Before the first reply there is no cache to show: today's band, as it was.
     if (!view) {
       return (
-        <Box flexDirection="row" backgroundColor={BG} paddingX={1}>
+        <Box flexDirection="row" paddingX={1}>
           {label}
           {usage}
         </Box>
@@ -253,8 +255,8 @@ export const register: Register = on => {
     const summary = cold
       ? [
           <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
-          mine ? <Text key="dot" color={MUTED}> · </Text> : null,
-          mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
+          mine ? <Text key="dot" dimColor> · </Text> : null,
+          mine ? <Text key="cost" bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
         ]
       : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
 
@@ -266,7 +268,7 @@ export const register: Register = on => {
     const grow = <Box key="grow" flexGrow={1} />
 
     let rows
-    if (kind === 'wide') {
+    if (layout === 'wide') {
       rows = (
         <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
           {label}
@@ -281,7 +283,7 @@ export const register: Register = on => {
           {button}
         </Box>
       )
-    } else if (kind === 'stacked') {
+    } else if (layout === 'stacked') {
       // The cache becomes a third stacked block, the same shape as 7D and 5H.
       rows = (
         <Box key="row" flexDirection="row" paddingX={1}>
@@ -293,8 +295,8 @@ export const register: Register = on => {
               <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
               {mine ? (
                 <Box flexDirection="row">
-                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
-                  <Text color={MUTED}> next</Text>
+                  <Text bold>{usd(costOf(mine, mode, view.tokens))}</Text>
+                  <Text dimColor> next</Text>
                 </Box>
               ) : null}
             </Box>
@@ -330,7 +332,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" backgroundColor={BG}>
+      <Box flexDirection="column">
         {rows}
         {card}
       </Box>
