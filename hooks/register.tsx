@@ -21,6 +21,11 @@ import type { CacheView } from './cache-art'
 const CELLS = 10
 const LOW_AT = 15
 const TIGHT_CELLS = 6
+/** The full one row (label, "% left", the cache's minutes) needs about this many columns. */
+const FULL_AT = 106
+/** From here up to FULL_AT the band stays one row, in short words: no label, "94% 2d5h". */
+const COMPACT_AT = 66
+const COMPACT_CELLS = 5
 /** How often the band redraws, so the countdown and the warm-to-cold flip stay current. */
 const TICK_MS = 30_000
 
@@ -162,8 +167,9 @@ export const register: Register = on => {
 
     const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
     const kind = kindOf(columns)
-    const isWide = kind === 'wide'
-    const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
+    const compact = columns >= COMPACT_AT && columns < FULL_AT
+    const isWide = kind === 'wide' || compact
+    const cells = compact ? COMPACT_CELLS : kind === 'tight' ? TIGHT_CELLS : CELLS
 
     const parts = (w: Window) => {
       const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
@@ -192,6 +198,21 @@ export const register: Register = on => {
       )
     }
 
+    // Compact: the same row in short words, so it fits where the full row clips.
+    const short = (w: Window, i: number) => {
+      const p = parts(w)
+      return (
+        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={2}>
+          <Text color={MUTED} bold>{p.name} </Text>
+          <Text color={p.col}>{p.d.on}</Text>
+          <Text color={EMPTY}>{p.d.off}</Text>
+          <Text color={p.col} bold> {Math.round(p.left)}%</Text>
+          {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
+          {p.reset ? <Text color={MUTED}> {p.reset.replace(' ', '')}</Text> : null}
+        </Box>
+      )
+    }
+
     const stacked = (w: Window, i: number) => {
       const p = parts(w)
       return (
@@ -210,13 +231,13 @@ export const register: Register = on => {
       )
     }
 
-    const label = (
+    const label = compact ? null : (
       <Box key="label" flexShrink={0} marginRight={isWide ? 2 : 3}>
         <Text color={TEXT} bold>USAGE</Text>
       </Box>
     )
     const usage = list.length > 0
-      ? list.map(isWide ? wide : stacked)
+      ? list.map(compact ? short : isWide ? wide : stacked)
       : [<Box key="wait" flexShrink={0} marginRight={3}><Text color={MUTED}>waiting for the first reply</Text></Box>]
 
     // Before the first reply there is no cache to show: today's band, as it was.
@@ -250,7 +271,13 @@ export const register: Register = on => {
         ]
       : [<Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
 
-    const summary = cold
+    const summary = compact
+      ? cold
+        ? [mine
+            ? <Text key="cost" color={TEXT} bold>{` ${usd(costOf(mine, mode, view.tokens))}`}</Text>
+            : <Text key="idle" color={hue} bold>{` ${view.idle.replace(' ', '')}`}</Text>]
+        : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m`}</Text>]
+      : cold
       ? [
           <Text key="idle" color={hue} bold>{` ${view.idle}`}</Text>,
           mine ? <Text key="dot" color={MUTED}> · </Text> : null,
@@ -266,7 +293,7 @@ export const register: Register = on => {
     const grow = <Box key="grow" flexGrow={1} />
 
     let rows
-    if (kind === 'wide') {
+    if (isWide) {
       rows = (
         <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
           {label}

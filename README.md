@@ -76,6 +76,7 @@ The card shows how long you've been idle, how many tokens are in the cache, and 
 ### Fits any width
 
 - **Wide:** everything on one row.
+- **Medium:** still one row, in short words: no label, `94% 2d5h`, and the cache as `WARM 60m` or the price.
 - **Half width:** each window stacks into a small block.
 - **Narrow:** the cache moves to its own row.
 - **Terminal:** the same facts as plain text.
