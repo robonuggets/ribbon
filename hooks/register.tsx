@@ -18,7 +18,7 @@ import type { CacheView } from './cache-art'
 // cold starts open, and a choice holds until the cache flips. Zero token cost:
 // it reads the engine's own figures and draws.
 
-const CELLS = 10
+const CELLS = 8
 const LOW_AT = 15
 const TIGHT_CELLS = 6
 /** How often the band redraws, so the countdown and the warm-to-cold flip stay current. */
@@ -161,9 +161,28 @@ export const register: Register = on => {
     }
 
     const columns = e.props.bodyColumns ?? e.viewport?.columns ?? 100
-    const kind = kindOf(columns)
+    // The one row clips instead of wrapping, so count what it needs before using it.
+    const rowCols = (n: number, short: boolean): number => {
+      let total = 'USAGE'.length + 2
+      for (const w of list) {
+        const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
+        const reset = fmtReset(w.resetsAt, now)
+        total += (NAMES[w.kind] ?? w.kind).length + 1 + n
+        total += (short ? ` ${left}%` : ` ${left}% left`).length
+        total += (left < LOW_AT ? 5 : 0) + (reset ? ` · ${reset}`.length : 0) + 3
+      }
+      if (view) {
+        const mins = Math.max(0, TTL_MIN - view.idleMin)
+        const text = view.mode === 'cold' ? ` ${view.idle} · $00.00` : short ? ` ${mins}m` : ` ${mins}m left`
+        total += 10 + text.length + 2 + 9 // Robo and chip, the text, a gap, the Show button
+      }
+      return total
+    }
+    const full = rowCols(CELLS, false) <= columns
+    const short = !full && rowCols(TIGHT_CELLS, true) <= columns
+    const kind = full || short ? 'wide' : kindOf(columns) === 'wide' ? 'stacked' : kindOf(columns)
     const isWide = kind === 'wide'
-    const cells = kind === 'tight' ? TIGHT_CELLS : CELLS
+    const cells = full || kind === 'stacked' ? CELLS : TIGHT_CELLS
 
     const parts = (w: Window) => {
       const left = Math.max(0, Math.round((100 - w.percentUsed) * 10) / 10)
@@ -181,11 +200,11 @@ export const register: Register = on => {
     const wide = (w: Window, i: number) => {
       const p = parts(w)
       return (
-        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
+        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={2}>
           <Text color={MUTED} bold>{p.name} </Text>
           <Text color={p.col}>{p.d.on}</Text>
           <Text color={EMPTY}>{p.d.off}</Text>
-          <Text color={p.col} bold> {p.left}% left</Text>
+          <Text color={p.col} bold>{short ? ` ${p.left}%` : ` ${p.left}% left`}</Text>
           {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
           {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
         </Box>
@@ -195,7 +214,7 @@ export const register: Register = on => {
     const stacked = (w: Window, i: number) => {
       const p = parts(w)
       return (
-        <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={3}>
+        <Box key={`w-${i}`} flexDirection="column" flexShrink={0} marginRight={2}>
           <Box flexDirection="row">
             <Text color={MUTED} bold>{p.name} </Text>
             <Text color={p.col}>{p.d.on}</Text>
@@ -256,7 +275,7 @@ export const register: Register = on => {
           mine ? <Text key="dot" color={MUTED}> · </Text> : null,
           mine ? <Text key="cost" color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text> : null,
         ]
-      : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>]
+      : [<Text key="left" color={hue} bold>{` ${Math.max(0, TTL_MIN - view.idleMin)}m${short ? '' : ' left'}`}</Text>]
 
     const button = Svg ? (
       <Box key="fold" flexShrink={0} alignItems="flex-start">

@@ -26,10 +26,10 @@ export const WORD: Record<Mode, string> = { warm: 'WARM', cold: 'COLD' }
 export const TTL_MIN = 60
 export const TTL_MS = TTL_MIN * 60 * 1000
 
-/** One row needs about 78 columns for two windows; under that, each window stacks. */
-export const WIDE_AT = 78
+/** One row needs about 112 columns for two windows plus the cache badge and Show button; under that, each window stacks. */
+export const WIDE_AT = 112
 /** Under this the dot bars shrink and the cache gets its own row. */
-export const TIGHT_AT = 42
+export const TIGHT_AT = 60
 
 export const kindOf = (columns: number): Kind => (columns >= WIDE_AT ? 'wide' : columns >= TIGHT_AT ? 'stacked' : 'tight')
 

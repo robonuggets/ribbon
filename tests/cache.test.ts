@@ -9,7 +9,7 @@ const PROPS = {
   hasSurvey: false,
   isWorking: false,
   maxRows: 12,
-  bodyColumns: 80,
+  bodyColumns: 120,
   scroll: { offset: 0, bodyRows: 12 },
   view: {},
 } as const
@@ -52,8 +52,8 @@ test('a cold cache opens the card with the re-cache price, and Hide folds it to 
   const card = await band.find({ key: 'card' })
   expect(card).toBeDefined()
   expect(JSON.stringify(card)).toContain('Cache cold. Idle 3d 9h. Next message re-caches 770k tokens.')
-  // The page's width: 80 columns is a 1020 px band.
-  expect(JSON.stringify(card)).toContain('width=\\"1020\\"')
+  // The page's width: 120 columns is a 1500 px band.
+  expect(JSON.stringify(card)).toContain('width=\\"1500\\"')
 
   await band.press({ key: 'cache-fold' })
   expect(await band.find({ key: 'card' })).toBeUndefined()
@@ -72,7 +72,7 @@ test('squeezed, the folded cache stacks as a third block, then takes its own row
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: WARM_IDLE, context_tokens: 770000, model: 'claude-opus-5-5' })
 
-  const half = await $.ui.mount({ plugin: 'ribbon', surface: 'desktop', component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 53 } })
+  const half = await $.ui.mount({ plugin: 'ribbon', surface: 'desktop', component: 'AbovePrompt', props: { ...PROPS, bodyColumns: 60 } })
   expect(await half.find({ key: 'block' })).toBeDefined()
   expect(await half.find({ text: '42m left' })).toBeDefined()
   expect(await half.find({ text: '$0.15' })).toBeDefined()
