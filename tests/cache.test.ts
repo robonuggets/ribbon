@@ -119,3 +119,20 @@ test('a cleared session drops the cache until the next reply', async ($, on) => 
   expect(await band.find({ text: ' 99% left' })).toBeDefined()
   await band.unmount()
 })
+
+test('on one row the cache and its button wrap together, so neither runs past the edge', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: NOW })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 }, rateLimits: WINDOWS } }))
+  on('classic.SessionStart', () => ({}))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: WARM_IDLE, context_tokens: 770000, model: 'claude-opus-5-5' })
+
+  const band = await $.ui.mount({ plugin: 'ribbon', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  expect((await band.find({ key: 'row' }))?.props.flexWrap).toBe('wrap')
+  const tail = JSON.stringify(await band.find({ key: 'tail' }))
+  expect(tail).toContain(' 42m left')
+  expect(tail).toContain('cache-fold')
+  await band.unmount()
+})

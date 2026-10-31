@@ -265,42 +265,49 @@ export const register: Register = on => {
     ) : null
     const grow = <Box key="grow" flexGrow={1} />
 
+    // The cache and its fold button travel as one tail. Desktop text runs wider
+    // than the columns count, so the row wraps: when the tail does not fit beside
+    // the usage bars it drops to a line of its own instead of running past the edge.
     let rows
     if (kind === 'wide') {
       rows = (
-        <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
+        <Box key="row" flexDirection="row" flexWrap="wrap" paddingX={1} alignItems="center">
           {label}
           {usage}
-          {open ? null : (
-            <Box key="inline" flexDirection="row" flexShrink={0} marginRight={2} alignItems="center">
-              {badge}
-              {summary}
-            </Box>
-          )}
-          {grow}
-          {button}
+          <Box key="tail" flexDirection="row" flexGrow={1} flexShrink={0} alignItems="center">
+            {open ? null : (
+              <Box key="inline" flexDirection="row" flexShrink={0} marginRight={2} alignItems="center">
+                {badge}
+                {summary}
+              </Box>
+            )}
+            {grow}
+            {button}
+          </Box>
         </Box>
       )
     } else if (kind === 'stacked') {
       // The cache becomes a third stacked block, the same shape as 7D and 5H.
       rows = (
-        <Box key="row" flexDirection="row" paddingX={1}>
+        <Box key="row" flexDirection="row" flexWrap="wrap" paddingX={1}>
           {label}
           {usage}
-          {open ? null : (
-            <Box key="block" flexDirection="column" flexShrink={0} marginRight={2}>
-              <Box flexDirection="row" alignItems="center">{badge}</Box>
-              <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
-              {mine ? (
-                <Box flexDirection="row">
-                  <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
-                  <Text color={MUTED}> next</Text>
-                </Box>
-              ) : null}
-            </Box>
-          )}
-          {grow}
-          {button}
+          <Box key="tail" flexDirection="row" flexGrow={1} flexShrink={0}>
+            {open ? null : (
+              <Box key="block" flexDirection="column" flexShrink={0} marginRight={2}>
+                <Box flexDirection="row" alignItems="center">{badge}</Box>
+                <Text color={hue} bold>{cold ? `${view.idle} idle` : `${Math.max(0, TTL_MIN - view.idleMin)}m left`}</Text>
+                {mine ? (
+                  <Box flexDirection="row">
+                    <Text color={TEXT} bold>{usd(costOf(mine, mode, view.tokens))}</Text>
+                    <Text color={MUTED}> next</Text>
+                  </Box>
+                ) : null}
+              </Box>
+            )}
+            {grow}
+            {button}
+          </Box>
         </Box>
       )
     } else {
