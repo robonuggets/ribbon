@@ -90,11 +90,29 @@ export type CacheView = {
 export const mineModel = (v: CacheView): Model | undefined => MODELS.find(m => m.id === v.mine)
 
 // ---------- SVG helpers ----------
+// Light theme: CSS beats fill/stroke attributes, so the dark palette is swapped per value.
+const LIGHT: [string, string][] = [
+  [TEXT, '#2b2925'],
+  [MUTED, '#6f6a5d'],
+  [EMPTY, '#d6d1c4'],
+  [LINE, '#e3dfd4'],
+  [HUE.warm, '#b84a4a'],
+  [HUE.cold, '#3d8296'],
+  [INK, '#ffffff'],
+]
+const LIGHT_CSS =
+  '@media (prefers-color-scheme: light){' +
+  LIGHT.map(([d, l]) => `[fill="${d}"]{fill:${l}}[stroke="${d}"]{stroke:${l}}`).join('') +
+  '}'
+
 export const svgDoc = (w: number, h: number, body: string, font: boolean): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+  '<style>' +
   (font
-    ? `<style>@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}</style>`
+    ? `@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}`
     : '') +
+  LIGHT_CSS +
+  '</style>' +
   body +
   '</svg>'
 
@@ -324,7 +342,8 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       zoneCost(13, 182, (W - 26) / 4, { compact: true })
   }
   const h = H + CARD_TOP
-  const body = `<rect width="${W}" height="${h}" fill="${BG}"/><g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
+  // No background rect: the card sits on the app's own background, like the band.
+  const body = `<g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
   const alt = cold
     ? `Cache cold. Idle ${v.idle}. Next message re-caches ${tok(v.tokens)} tokens.`
     : `Cache warm. Goes cold in ${Math.max(0, TTL_MIN - v.idleMin)} minutes. ${tok(v.tokens)} tokens cached.`

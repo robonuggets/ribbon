@@ -3,10 +3,17 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CacheFacts, Fold, Window } from '../types'
 import {
-  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
+  HUE, INK, ROBO_SIZE, TTL_MIN, TTL_MS, WORD,
   bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
+
+// Theme keys, not hex: the band's text follows the app's light or dark theme.
+const TEXT = 'text'
+const MUTED = 'inactive'
+const EMPTY = 'subtle'
+const ORANGE = 'claude'
+const YELLOW = 'warning'
 
 // A band above the prompt in a warm dark look: card surface, cream text,
 // dot-matrix bars. Shows how much of each usage window is LEFT, 7-day first, then
@@ -154,7 +161,7 @@ export const register: Register = on => {
 
     if (list.length === 0 && !view) {
       return (
-        <Box backgroundColor={BG} paddingX={1}>
+        <Box paddingX={1}>
           <Text color={MUTED}>USAGE · waiting for the first reply</Text>
         </Box>
       )
@@ -222,7 +229,7 @@ export const register: Register = on => {
     // Before the first reply there is no cache to show: today's band, as it was.
     if (!view) {
       return (
-        <Box flexDirection="row" backgroundColor={BG} paddingX={1}>
+        <Box flexDirection="row" paddingX={1}>
           {label}
           {usage}
         </Box>
@@ -330,7 +337,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" backgroundColor={BG}>
+      <Box flexDirection="column">
         {rows}
         {card}
       </Box>
