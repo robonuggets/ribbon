@@ -3,12 +3,12 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CacheFacts, Fold, Window } from '../types'
 import {
-  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
+  HUE, INK, ROBO_SIZE, TTL_MIN, TTL_MS, WORD,
   bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
 
-// A band above the prompt in a warm dark look: card surface, cream text,
+// A band above the prompt on the app's own surface, in the person's theme, with
 // dot-matrix bars. Shows how much of each usage window is LEFT, 7-day first, then
 // 5-hour; 7D is orange, 5H is yellow; a window under 15% adds a bold LOW.
 //
@@ -17,6 +17,12 @@ import type { CacheView } from './cache-art'
 // next message costs to re-cache. Hide / Show folds the card; warm starts folded,
 // cold starts open, and a choice holds until the cache flips. Zero token cost:
 // it reads the engine's own figures and draws.
+
+// Theme keys, so the band's text follows light and dark.
+const TEXT = 'text'
+const MUTED = 'inactive'
+const EMPTY = 'subtle'
+const HUE_TEXT = { warm: 'error', cold: 'suggestion' } as const
 
 const CELLS = 10
 const LOW_AT = 15
@@ -30,7 +36,7 @@ const fold = atom({ plugin: 'ribbon', key: 'fold' } as const, null as Fold | nul
 
 const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H', spend_limit: 'SPEND' }
 const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1 }
-const COLORS: Record<string, string> = { seven_day: ORANGE, five_hour: YELLOW }
+const COLORS: Record<string, string> = { seven_day: 'claude', five_hour: 'warning' }
 
 const clean = (list: readonly Window[]): Window[] =>
   list
@@ -154,7 +160,7 @@ export const register: Register = on => {
 
     if (list.length === 0 && !view) {
       return (
-        <Box backgroundColor={BG} paddingX={1}>
+        <Box paddingX={1}>
           <Text color={MUTED}>USAGE · waiting for the first reply</Text>
         </Box>
       )
@@ -222,7 +228,7 @@ export const register: Register = on => {
     // Before the first reply there is no cache to show: today's band, as it was.
     if (!view) {
       return (
-        <Box flexDirection="row" backgroundColor={BG} paddingX={1}>
+        <Box flexDirection="row" paddingX={1}>
           {label}
           {usage}
         </Box>
@@ -231,7 +237,7 @@ export const register: Register = on => {
 
     const mode = view.mode
     const cold = mode === 'cold'
-    const hue = HUE[mode]
+    const hue = HUE_TEXT[mode]
     const mine = mineModel(view)
     const stored = await read($, fold)
     // Folding needs the card, and the card is a drawing: the terminal stays folded.
@@ -248,7 +254,7 @@ export const register: Register = on => {
             return <Svg key="chip" source={c.source} alt={WORD[mode]} width={c.w} height={c.h} />
           })(),
         ]
-      : [<Text key="chip" backgroundColor={hue} color={INK} bold>{` ${WORD[mode]} `}</Text>]
+      : [<Text key="chip" backgroundColor={HUE[mode]} color={INK} bold>{` ${WORD[mode]} `}</Text>]
 
     const summary = cold
       ? [
@@ -330,7 +336,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" backgroundColor={BG}>
+      <Box flexDirection="column">
         {rows}
         {card}
       </Box>

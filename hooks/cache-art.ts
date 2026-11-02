@@ -6,14 +6,21 @@ import { SANS } from './font'
 export type Mode = 'warm' | 'cold'
 export type Kind = 'wide' | 'stacked' | 'tight'
 
-// The band's own colours, measured from the app.
-export const BG = '#24221c'
-export const TEXT = '#e8e2d2'
-export const MUTED = '#8d8775'
-export const EMPTY = '#4a463b'
-export const LINE = '#36332b'
-export const ORANGE = '#ff6b1a'
-export const YELLOW = '#f5a623'
+// The drawings' colours are CSS variables, set per colour scheme in PALETTE, so a
+// drawing follows light and dark by itself and its background stays see-through:
+// the app's own rounded frame shows behind it.
+const TEXT = 'var(--text)'
+const MUTED = 'var(--muted)'
+const EMPTY = 'var(--empty)'
+const LINE = 'var(--line)'
+const vars = (c: Record<string, string>): string =>
+  Object.entries(c).map(([k, v]) => `--${k}:${v}`).join(';')
+const PALETTE =
+  ':root{color-scheme:light dark;background:transparent;' +
+  vars({ text: '#2b2a26', muted: '#75705f', empty: '#d6d2c6', line: '#dcd8cc', fire: '#b94f4f', ice: '#2f7f96', frost: '#3f8ba1' }) +
+  '}@media (prefers-color-scheme:dark){:root{' +
+  vars({ text: '#e8e2d2', muted: '#8d8775', empty: '#4a463b', line: '#36332b', fire: '#cc6363', ice: '#6aaabd', frost: '#b5d5de' }) +
+  '}}'
 
 // The cache's two states in a muted shade: desaturated so they sit
 // beside the band's own orange and yellow.
@@ -92,9 +99,9 @@ export const mineModel = (v: CacheView): Model | undefined => MODELS.find(m => m
 // ---------- SVG helpers ----------
 export const svgDoc = (w: number, h: number, body: string, font: boolean): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
-  (font
-    ? `<style>@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}</style>`
-    : '') +
+  `<style>${PALETTE}` +
+  (font ? `@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}` : '') +
+  '</style>' +
   body +
   '</svg>'
 
@@ -131,12 +138,6 @@ export const chipSvg = (mode: Mode): { source: string; w: number; h: number } =>
 // ---------- Robo: bobbing when warm, frozen in ice when cold ----------
 const ROBO_PIX = ['..X..X..', 'XXXXXXXX', 'XXXXXXXX', 'X.XXXX.X', 'XXXXXXXX', 'XXXXXXXX', 'X..XX..X']
 
-const mix = (a: string, b: string, t: number): string =>
-  '#' +
-  [1, 3, 5]
-    .map(i => Math.round(parseInt(a.substr(i, 2), 16) * (1 - t) + parseInt(b.substr(i, 2), 16) * t).toString(16).padStart(2, '0'))
-    .join('')
-
 // One path, not a rect per pixel: separate rects at fractional sizes leave faint
 // seams between them, while one path fills the shared edges solid.
 const pixels = (u: number, fill: string): string => {
@@ -172,7 +173,7 @@ export const roboShapes = (x: number, y: number, size: number, mode: Mode): stri
   }
   // Cold: still, pale, inside a rounded ice block with icicles and one twinkle.
   const u = size / 12.2
-  const ice = mix(HUE.cold, '#ffffff', 0.5)
+  const ice = 'var(--frost)'
   const ox = x + 1.6 * u
   const oy = y + 1.6 * u
   const bx = -1.2 * u
@@ -211,9 +212,9 @@ const CARD_TOP = 6
 export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; w: number; h: number; alt: string } => {
   const mode = v.mode
   const cold = mode === 'cold'
-  const HUEM = HUE[mode]
-  const FIRE = HUE.warm
-  const ICE = HUE.cold
+  const HUEM = cold ? 'var(--ice)' : 'var(--fire)'
+  const FIRE = 'var(--fire)'
+  const ICE = 'var(--ice)'
   const t = (x: number, y: number, str: string, o: TextOpts = {}) =>
     `<text x="${x}" y="${y}" font-size="${o.size || 11}" font-weight="${o.w || 700}" fill="${o.fill || MUTED}"` +
     ` letter-spacing="${o.ls ?? 0}" text-anchor="${o.anchor || 'start'}">${str}</text>`
@@ -226,7 +227,7 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
     let g = ''
     if (o.header) {
       g += roboShapes(x - 2, y + k.lab - 17, 22, mode)
-      const c = chipShapes(x + 26, y + k.lab - 13, WORD[mode], HUEM, 11, 1)
+      const c = chipShapes(x + 26, y + k.lab - 13, WORD[mode], HUE[mode], 11, 1)
       g += c.svg + t(x + 26 + c.w + 8, y + k.lab, 'IDLE', { ls: 1.4 })
     } else {
       g += t(x, y + k.lab, 'IDLE', { ls: 1.4 })
@@ -290,7 +291,7 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       for (let r = 0; r < k.rows; r++)
         for (let c = 0; c < 3; c++)
           g += `<circle cx="${bx + 3 + c * 8}" cy="${y + k.base - r * k.step}" r="2.8" fill="${r < n ? (mine ? HUEM : MUTED) : EMPTY}"/>`
-      if (mine) g += chipShapes(bx + 30, y + k.chip, 'YOU', HUEM, 10, 0.8).svg
+      if (mine) g += chipShapes(bx + 30, y + k.chip, 'YOU', HUE[mode], 10, 0.8).svg
       g += t(bx + 30, y + k.price, usd(costOf(m, mode, v.tokens)), { size: 17, w: mine ? 700 : 500, fill: mine ? TEXT : MUTED })
       g += t(bx + 30, y + k.name, m.NAME, { size: 11, w: 700, fill: mine ? HUEM : MUTED, ls: 0.8 })
     })
@@ -324,7 +325,7 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       zoneCost(13, 182, (W - 26) / 4, { compact: true })
   }
   const h = H + CARD_TOP
-  const body = `<rect width="${W}" height="${h}" fill="${BG}"/><g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
+  const body = `<g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
   const alt = cold
     ? `Cache cold. Idle ${v.idle}. Next message re-caches ${tok(v.tokens)} tokens.`
     : `Cache warm. Goes cold in ${Math.max(0, TTL_MIN - v.idleMin)} minutes. ${tok(v.tokens)} tokens cached.`
