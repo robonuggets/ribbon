@@ -104,6 +104,24 @@ test('the terminal draws the cache as text, with no drawings and no fold button'
   await band.unmount()
 })
 
+test('the band paints no background, and its drawings follow the colour scheme', async ($, on) => {
+  mock.store(on)
+  mock.clock(on, { now: NOW })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 }, rateLimits: WINDOWS } }))
+  on('classic.SessionStart', () => ({}))
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await $.classic.SessionStart({ source: 'resume', seconds_since_last_response: COLD_IDLE, context_tokens: 770000, model: 'claude-opus-5-5' })
+
+  const band = await $.ui.mount({ plugin: 'ribbon', surface: 'desktop', component: 'AbovePrompt', props: PROPS })
+  const boxes = await band.findAll({ type: 'Box' })
+  expect(boxes.some(b => b.props.backgroundColor)).toBe(false)
+  const card = JSON.stringify(await band.find({ key: 'card' }))
+  expect(card).toContain('prefers-color-scheme:dark')
+  expect(card).not.toContain('#24221c')
+  await band.unmount()
+})
+
 test('a cleared session drops the cache until the next reply', async ($, on) => {
   mock.store(on)
   mock.clock(on, { now: NOW })
