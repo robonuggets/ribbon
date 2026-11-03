@@ -90,11 +90,30 @@ export type CacheView = {
 export const mineModel = (v: CacheView): Model | undefined => MODELS.find(m => m.id === v.mine)
 
 // ---------- SVG helpers ----------
+// The engine tells a hook nothing of the theme, but a drawing sees the system's
+// colour scheme: on a light one, CSS swaps the dark palette's colours (CSS wins
+// over the fill and stroke attributes the drawings write).
+const LIGHT: Record<string, string> = {
+  [TEXT]: '#1f1e1b',
+  [MUTED]: '#6b6658',
+  [EMPTY]: '#d9d4c7',
+  [LINE]: '#e4dfd3',
+  [HUE.cold]: '#3f8aa0',
+}
+const LIGHT_CSS =
+  '@media (prefers-color-scheme: light){' +
+  Object.entries(LIGHT)
+    .map(([dark, light]) => `[fill="${dark}"]{fill:${light}}[stroke="${dark}"]{stroke:${light}}`)
+    .join('') +
+  '}'
+
 export const svgDoc = (w: number, h: number, body: string, font: boolean): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+  `<style>${LIGHT_CSS}` +
   (font
-    ? `<style>@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}</style>`
+    ? `@font-face{font-family:RS;font-weight:100 900;src:url(data:font/woff2;base64,${SANS}) format('woff2')} text{font-family:RS,system-ui,'Segoe UI',sans-serif}`
     : '') +
+  '</style>' +
   body +
   '</svg>'
 
@@ -129,7 +148,15 @@ export const chipSvg = (mode: Mode): { source: string; w: number; h: number } =>
 }
 
 // ---------- Robo: bobbing when warm, frozen in ice when cold ----------
-const ROBO_PIX = ['..X..X..', 'XXXXXXXX', 'XXXXXXXX', 'X.XXXX.X', 'XXXXXXXX', 'XXXXXXXX', 'X..XX..X']
+// Clawd, the Claude Code mascot, decoded from the welcome screen's quadrant blocks
+// (▐▛███▜▌ / ▝▜█████▛▘ / ▘▘ ▝▝): one quadrant is one pixel, twice as tall as
+// wide like a terminal cell's quadrant.
+const ROBO_PIX = ['..XXXXXXXXXXXX..', '..XX.XXXXXX.XX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..', '...X.X....X.X...']
+const PIX_W = 16
+/** Rows in pixel widths (each row is 2 units tall). */
+const PIX_H = 10
+/** Claude's own orange. */
+const CLAWD = '#d97757'
 
 const mix = (a: string, b: string, t: number): string =>
   '#' +
@@ -143,48 +170,52 @@ const pixels = (u: number, fill: string): string => {
   let d = ''
   ROBO_PIX.forEach((row, y) =>
     [...row].forEach((ch, x) => {
-      if (ch === 'X') d += `M${x * u} ${y * u}h${u}v${u}h${-u}z`
+      if (ch === 'X') d += `M${x * u} ${y * 2 * u}h${u}v${2 * u}h${-u}z`
     }),
   )
   return `<path d="${d}" fill="${fill}"/>`
 }
 
+/** Clawd's eyes, filled in so they read on a light background as on a dark one. */
+const eyes = (u: number, fill: string): string =>
+  `<rect x="${4 * u}" y="${2 * u}" width="${u}" height="${2 * u}" fill="${fill}"/><rect x="${11 * u}" y="${2 * u}" width="${u}" height="${2 * u}" fill="${fill}"/>`
+
 /** Robo in a box `size` pixels square, top-left at x, y. SMIL only, so the Svg needs isInteractive. */
 export const roboShapes = (x: number, y: number, size: number, mode: Mode): string => {
   const ease = 'calcMode="spline" keyTimes="0;0.5;1" keySplines=".45 0 .55 1;.45 0 .55 1"'
   if (mode === 'warm') {
-    // Robo takes the WARM chip's red, so the two read as one badge.
-    const ROBO = HUE.warm
-    const u = size / 10
+    const u = size / 18
     const ox = x + u
-    const oy = y + 1.6 * u
+    const oy = y + (size - PIX_H * u) / 2
     return (
       `<g transform="translate(${ox} ${oy})" shape-rendering="crispEdges">` +
-      `<ellipse cx="${4 * u}" cy="${7.75 * u}" rx="${3 * u}" ry="${0.42 * u}" fill="#000" opacity=".4" shape-rendering="auto">` +
-      `<animate attributeName="rx" values="${3 * u};${2.3 * u};${3 * u}" dur="1.2s" repeatCount="indefinite" ${ease}/></ellipse>` +
+      `<ellipse cx="${(PIX_W / 2) * u}" cy="${(PIX_H + 0.7) * u}" rx="${6 * u}" ry="${0.42 * u}" fill="#000" opacity=".4" shape-rendering="auto">` +
+      `<animate attributeName="rx" values="${6 * u};${4.8 * u};${6 * u}" dur="1.2s" repeatCount="indefinite" ${ease}/></ellipse>` +
       `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 ${-1.1 * u};0 0" dur="1.2s" repeatCount="indefinite" ${ease}/>` +
-      pixels(u, ROBO) +
-      // A blink every few seconds: the eye holes fill for a moment.
-      `<g opacity="0"><rect x="${u}" y="${3 * u}" width="${u}" height="${u}" fill="${ROBO}"/><rect x="${6 * u}" y="${3 * u}" width="${u}" height="${u}" fill="${ROBO}"/>` +
+      pixels(u, CLAWD) +
+      eyes(u, '#000') +
+      // A blink every few seconds: the eyes take the body colour for a moment.
+      `<g opacity="0">${eyes(u, CLAWD)}` +
       `<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.9;0.91;0.95;1" dur="3.4s" repeatCount="indefinite"/></g>` +
       `</g></g>`
     )
   }
   // Cold: still, pale, inside a rounded ice block with icicles and one twinkle.
-  const u = size / 12.2
+  const u = size / 20
   const ice = mix(HUE.cold, '#ffffff', 0.5)
-  const ox = x + 1.6 * u
-  const oy = y + 1.6 * u
+  const bw = (PIX_W + 2.4) * u
+  const bh = (PIX_H + 2.4) * u
+  const ox = x + (size - bw) / 2 + 1.2 * u
+  const oy = y + (size - bh - 1.5 * u) / 2 + 1.2 * u
   const bx = -1.2 * u
   const by = -1.2 * u
-  const bw = 10.4 * u
-  const bh = 9.4 * u
   let s = `<g transform="translate(${ox} ${oy})">`
   s += pixels(u, ice)
-  s += `<rect x="${2 * u}" y="0" width="${u}" height="${u * 0.45}" fill="#fff" opacity=".9"/><rect x="${5 * u}" y="0" width="${u}" height="${u * 0.45}" fill="#fff" opacity=".9"/>`
+  s += eyes(u, '#000')
+  s += `<rect x="${4 * u}" y="0" width="${u}" height="${u * 0.45}" fill="#fff" opacity=".9"/><rect x="${11 * u}" y="0" width="${u}" height="${u * 0.45}" fill="#fff" opacity=".9"/>`
   s += `<rect x="${bx}" y="${by}" width="${bw}" height="${bh}" rx="${1.5 * u}" fill="${HUE.cold}" fill-opacity=".28" stroke="${ice}" stroke-width="${0.38 * u}"/>`
   s += `<path d="M${bx + 0.9 * u} ${by + 2.6 * u}l${1.6 * u} ${-1.6 * u}M${bx + 0.9 * u} ${by + 4.2 * u}l${0.8 * u} ${-0.8 * u}" stroke="#fff" stroke-opacity=".75" stroke-width="${0.32 * u}" stroke-linecap="round"/>`
-  for (const ix of [1.4, 4.4, 7.2]) {
+  for (const ix of [2.4, 8.6, 14.8]) {
     const tx = bx + ix * u
     const ty = by + bh
     s += `<path d="M${tx} ${ty}h${0.9 * u}l${-0.45 * u} ${1.5 * u}z" fill="${ice}"/>`
@@ -324,7 +355,8 @@ export const cardSvg = (v: CacheView, kind: Kind, W: number): { source: string; 
       zoneCost(13, 182, (W - 26) / 4, { compact: true })
   }
   const h = H + CARD_TOP
-  const body = `<rect width="${W}" height="${h}" fill="${BG}"/><g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
+  // No background: the card sits on the app's own, light or dark, as the band does.
+  const body = `<g transform="translate(0 ${CARD_TOP})">` + hline(0) + g + '</g>'
   const alt = cold
     ? `Cache cold. Idle ${v.idle}. Next message re-caches ${tok(v.tokens)} tokens.`
     : `Cache warm. Goes cold in ${Math.max(0, TTL_MIN - v.idleMin)} minutes. ${tok(v.tokens)} tokens cached.`

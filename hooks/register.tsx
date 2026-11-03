@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { CacheFacts, Fold, Window } from '../types'
 import {
-  BG, EMPTY, HUE, INK, MUTED, ORANGE, ROBO_SIZE, TEXT, TTL_MIN, TTL_MS, WORD, YELLOW,
+  HUE, INK, ORANGE, ROBO_SIZE, TTL_MIN, TTL_MS, WORD, YELLOW,
   bandPx, cardSvg, chipSvg, costOf, familyOf, fmtIdle, kindOf, mineModel, roboSvg, usd,
 } from './cache-art'
 import type { CacheView } from './cache-art'
@@ -18,9 +18,16 @@ import type { CacheView } from './cache-art'
 // cold starts open, and a choice holds until the cache flips. Zero token cost:
 // it reads the engine's own figures and draws.
 
-const CELLS = 10
+// The band's text takes the person's theme keys, so it reads on a light or a dark
+// app; the band itself has no background of its own.
+const TEXT = 'text'
+const MUTED = 'inactive'
+const EMPTY = 'subtle'
+
+// Short bars, so both windows and the cache fit on one row.
+const CELLS = 6
 const LOW_AT = 15
-const TIGHT_CELLS = 6
+const TIGHT_CELLS = 5
 /** How often the band redraws, so the countdown and the warm-to-cold flip stay current. */
 const TICK_MS = 30_000
 
@@ -29,7 +36,7 @@ const cache = atom({ plugin: 'ribbon', key: 'cache' } as const, null as CacheFac
 const fold = atom({ plugin: 'ribbon', key: 'fold' } as const, null as Fold | null)
 
 const NAMES: Record<string, string> = { seven_day: '7D', five_hour: '5H', spend_limit: 'SPEND' }
-const ORDER: Record<string, number> = { seven_day: 0, five_hour: 1 }
+const ORDER: Record<string, number> = { five_hour: 0, seven_day: 1 }
 const COLORS: Record<string, string> = { seven_day: ORANGE, five_hour: YELLOW }
 
 const clean = (list: readonly Window[]): Window[] =>
@@ -154,7 +161,7 @@ export const register: Register = on => {
 
     if (list.length === 0 && !view) {
       return (
-        <Box backgroundColor={BG} paddingX={1}>
+        <Box paddingX={1}>
           <Text color={MUTED}>USAGE · waiting for the first reply</Text>
         </Box>
       )
@@ -181,11 +188,11 @@ export const register: Register = on => {
     const wide = (w: Window, i: number) => {
       const p = parts(w)
       return (
-        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={3}>
+        <Box key={`w-${i}`} flexDirection="row" flexShrink={0} marginRight={2}>
           <Text color={MUTED} bold>{p.name} </Text>
           <Text color={p.col}>{p.d.on}</Text>
           <Text color={EMPTY}>{p.d.off}</Text>
-          <Text color={p.col} bold> {p.left}% left</Text>
+          <Text color={p.col} bold> {p.left}%</Text>
           {p.left < LOW_AT ? <Text color={TEXT} bold> LOW</Text> : null}
           {p.reset ? <Text color={MUTED}> · {p.reset}</Text> : null}
         </Box>
@@ -222,7 +229,7 @@ export const register: Register = on => {
     // Before the first reply there is no cache to show: today's band, as it was.
     if (!view) {
       return (
-        <Box flexDirection="row" backgroundColor={BG} paddingX={1}>
+        <Box flexDirection="row" paddingX={1}>
           {label}
           {usage}
         </Box>
@@ -260,7 +267,8 @@ export const register: Register = on => {
 
     const button = Svg ? (
       <Box key="fold" flexShrink={0} alignItems="flex-start">
-        <Button key="cache-fold" label={open ? 'Hide' : 'Show'} onPress={toggle} />
+        {/* A desktop draws its native button; its default style left the label unreadable. */}
+        <Button key="cache-fold" label={open ? 'Hide' : 'Show'} variant="primary" onPress={toggle} />
       </Box>
     ) : null
     const grow = <Box key="grow" flexGrow={1} />
@@ -268,7 +276,8 @@ export const register: Register = on => {
     let rows
     if (kind === 'wide') {
       rows = (
-        <Box key="row" flexDirection="row" paddingX={1} alignItems="center">
+        // The desktop's native button is taller than a text row: "xs" pads it there and is 0 rows in a terminal.
+        <Box key="row" flexDirection="row" paddingX={1} paddingY="xs" alignItems="center">
           {label}
           {usage}
           {open ? null : (
@@ -310,7 +319,7 @@ export const register: Register = on => {
           {label}
           {usage}
         </Box>,
-        <Box key="cache" flexDirection="row" paddingX={1} alignItems="center">
+        <Box key="cache" flexDirection="row" paddingX={1} paddingY="xs" alignItems="center">
           {badge}
           {summary}
           {grow}
@@ -330,7 +339,7 @@ export const register: Register = on => {
     }
 
     return (
-      <Box flexDirection="column" backgroundColor={BG}>
+      <Box flexDirection="column">
         {rows}
         {card}
       </Box>
