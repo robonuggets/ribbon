@@ -180,25 +180,102 @@ const pixels = (u: number, fill: string): string => {
 const eyes = (u: number, fill: string): string =>
   `<rect x="${4 * u}" y="${2 * u}" width="${u}" height="${2 * u}" fill="${fill}"/><rect x="${11 * u}" y="${2 * u}" width="${u}" height="${2 * u}" fill="${fill}"/>`
 
+// ---------- Robo's moves while warm ----------
+// Each pose is Robo's grid with one spare row on top for a raised arm: X is the
+// body, o an eye. The poses are our own, drawn in the same block style.
+const POSE: Record<string, string[]> = {
+  idle: ['................', '..XXXXXXXXXXXX..', '..XXoXXXXXXoXX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..', '...X.X....X.X...'],
+  blink: ['................', '..XXXXXXXXXXXX..', '..XXXXXXXXXXXX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..', '...X.X....X.X...'],
+  lookL: ['................', '..XXXXXXXXXXXX..', '..XoXXXXXXoXXX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..', '...X.X....X.X...'],
+  lookR: ['................', '..XXXXXXXXXXXX..', '..XXXoXXXXXXoX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..', '...X.X....X.X...'],
+  waveUp: ['..............XX', '..XXXXXXXXXXXXXX', '..XXoXXXXXXoXX..', 'XXXXXXXXXXXXXX..', '..XXXXXXXXXXXX..', '...X.X....X.X...'],
+  waveOut: ['................', '..XXXXXXXXXXXXXX', '..XXoXXXXXXoXX..', 'XXXXXXXXXXXXXX..', '..XXXXXXXXXXXX..', '...X.X....X.X...'],
+  cheer: ['XX............XX', 'XXXXXXXXXXXXXXXX', '..XXoXXXXXXoXX..', '..XXXXXXXXXXXX..', '..XXXXXXXXXXXX..', '...X.X....X.X...'],
+  crouch: ['................', '................', '..XXXXXXXXXXXX..', '..XXoXXXXXXoXX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..'],
+  stepA: ['................', '..XXXXXXXXXXXX..', '..XXoXXXXXXoXX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..', '..X.X.....X.X...'],
+  stepB: ['................', '..XXXXXXXXXXXX..', '..XXoXXXXXXoXX..', 'XXXXXXXXXXXXXXXX', '..XXXXXXXXXXXX..', '....X.X.....X.X.'],
+}
+/** Pose rows, in pixel widths (each row is 2 units tall). */
+const POSE_H = 12
+
+/** One beat: a pose, how long it holds (s), and how far it rises (units). */
+type Beat = [pose: string, sec: number, rise: number]
+const rep = (n: number, beats: Beat[]): Beat[] => Array.from({ length: n }, () => beats).flat()
+const BOB: Beat[] = [['idle', 0.5, 0], ['idle', 0.5, 1]]
+/** About 15 s of moves, then round again. */
+const MOVES: Beat[] = [
+  ...rep(3, BOB),
+  ['idle', 0.4, 0], ['blink', 0.12, 0], ['idle', 0.5, 0],
+  ['lookL', 0.7, 0], ['idle', 0.15, 0], ['lookR', 0.7, 0], ['idle', 0.3, 0],
+  ...rep(2, BOB),
+  ...rep(4, [['waveUp', 0.22, 0], ['waveOut', 0.22, 0]]), ['idle', 0.4, 0],
+  ...rep(2, BOB),
+  ['crouch', 0.15, 0], ['cheer', 0.12, 2], ['cheer', 0.18, 3], ['cheer', 0.12, 2], ['crouch', 0.12, 0], ['idle', 0.4, 0],
+  ...rep(3, [['stepA', 0.18, 0], ['stepB', 0.18, 0]]), ['idle', 0.3, 0],
+  ['blink', 0.12, 0], ['idle', 0.5, 0],
+]
+
+const r3 = (n: number): string => String(Math.round(n * 1000) / 1000)
+
+/** A pose as two paths, body then eyes, `u` pixels a grid unit. One rectangle per run of a row. */
+const poseShapes = (rows: string[], u: number): string => {
+  const d: Record<string, string> = { X: '', o: '' }
+  rows.forEach((row, y) => {
+    for (const m of row.matchAll(/X+|o+/g)) {
+      const w = r3(m[0].length * u)
+      d[m[0][0]] += `M${r3((m.index ?? 0) * u)} ${r3(y * 2 * u)}h${w}v${r3(2 * u)}h-${w}z`
+    }
+  })
+  return `<path d="${d.X}" fill="${CLAWD}"/><path d="${d.o}" fill="#000"/>`
+}
+
+/**
+ * Robo running through MOVES. One group per pose and height, each shown only on
+ * its own beats (discrete SMIL), so a still render shows the first beat.
+ */
+const movesShapes = (u: number): string => {
+  const total = MOVES.reduce((s, b) => s + b[1], 0)
+  const starts: number[] = []
+  let at = 0
+  for (const b of MOVES) {
+    starts.push(Math.round((at / total) * 10000) / 10000)
+    at += b[1]
+  }
+  const key = (b: Beat) => `${b[0]}@${b[2]}`
+  // A value is written only where it changes, to keep the drawing small.
+  const anim = (attr: string, values: string[]) => {
+    const vs: string[] = []
+    const ts: number[] = []
+    values.forEach((v, i) => {
+      if (i === 0 || v !== values[i - 1]) vs.push(v), ts.push(starts[i])
+    })
+    return `<animate attributeName="${attr}" values="${vs.join(';')}" keyTimes="${ts.join(';')}" dur="${r3(total)}s" calcMode="discrete" repeatCount="indefinite"/>`
+  }
+  // The shadow shrinks as Robo rises.
+  const rx = (b: Beat) => r3((6 - b[2] * 0.65) * u)
+  let s =
+    `<ellipse cx="${r3(8 * u)}" cy="${r3((POSE_H + 0.7) * u)}" rx="${rx(MOVES[0])}" ry="${r3(0.42 * u)}" fill="#000" opacity=".4" shape-rendering="auto">` +
+    anim('rx', MOVES.map(rx)) +
+    '</ellipse>'
+  for (const k of new Set(MOVES.map(key))) {
+    const [pose, rise] = k.split('@')
+    const shown = MOVES.map(b => (key(b) === k ? 'visible' : 'hidden'))
+    s +=
+      `<g transform="translate(0 ${r3(-Number(rise) * u)})" visibility="${shown[0]}">` +
+      poseShapes(POSE[pose], u) +
+      anim('visibility', shown) +
+      '</g>'
+  }
+  return s
+}
+
 /** Robo in a box `size` pixels square, top-left at x, y. SMIL only, so the Svg needs isInteractive. */
 export const roboShapes = (x: number, y: number, size: number, mode: Mode): string => {
-  const ease = 'calcMode="spline" keyTimes="0;0.5;1" keySplines=".45 0 .55 1;.45 0 .55 1"'
   if (mode === 'warm') {
     const u = size / 18
     const ox = x + u
-    const oy = y + (size - PIX_H * u) / 2
-    return (
-      `<g transform="translate(${ox} ${oy})" shape-rendering="crispEdges">` +
-      `<ellipse cx="${(PIX_W / 2) * u}" cy="${(PIX_H + 0.7) * u}" rx="${6 * u}" ry="${0.42 * u}" fill="#000" opacity=".4" shape-rendering="auto">` +
-      `<animate attributeName="rx" values="${6 * u};${4.8 * u};${6 * u}" dur="1.2s" repeatCount="indefinite" ${ease}/></ellipse>` +
-      `<g><animateTransform attributeName="transform" type="translate" values="0 0;0 ${-1.1 * u};0 0" dur="1.2s" repeatCount="indefinite" ${ease}/>` +
-      pixels(u, CLAWD) +
-      eyes(u, '#000') +
-      // A blink every few seconds: the eyes take the body colour for a moment.
-      `<g opacity="0">${eyes(u, CLAWD)}` +
-      `<animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.9;0.91;0.95;1" dur="3.4s" repeatCount="indefinite"/></g>` +
-      `</g></g>`
-    )
+    const oy = y + (size - POSE_H * u) / 2
+    return `<g transform="translate(${r3(ox)} ${r3(oy)})" shape-rendering="crispEdges">${movesShapes(u)}</g>`
   }
   // Cold: still, pale, inside a rounded ice block with icicles and one twinkle.
   const u = size / 20

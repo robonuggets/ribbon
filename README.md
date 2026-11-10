@@ -66,7 +66,7 @@ In a Claude Code terminal session, type:
 
 After your first reply, the band also tracks the prompt cache. The cache keeps your chat cheap to continue for one hour after your last message.
 
-- **WARM** (red, the robot bobs): the cache is live. It shows the minutes left and what your next message costs.
+- **WARM** (red, the robot bobs, looks around, waves and hops): the cache is live. It shows the minutes left and what your next message costs.
 - **COLD** (blue, the robot is frozen): the hour has passed. Your next message re-sends the whole chat, so it costs more. It shows the price first.
 
 Click **Show** to open the cache card, and **Hide** to fold it. Warm starts folded. Cold starts open, so you see the price before you send.
