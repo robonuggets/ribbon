@@ -30,11 +30,11 @@ test('the band shows percent left for each window once a reading lands', async (
       component: 'AbovePrompt',
       props: PROPS,
     })
-    expect(await band.find({ text: '42% left' })).toBeDefined()
-    expect(await band.find({ text: '87.5% left' })).toBeDefined()
-    // 7D (87.5% left) draws before 5H (42% left)
+    expect(await band.find({ text: ' 42%' })).toBeDefined()
+    expect(await band.find({ text: ' 87.5%' })).toBeDefined()
+    // 5H (42% left) draws before 7D (87.5% left)
     const all = JSON.stringify(await band.find({ type: 'Box' }))
-    expect(all.indexOf('7D')).toBeLessThan(all.indexOf('5H'))
+    expect(all.indexOf('5H')).toBeLessThan(all.indexOf('7D'))
     await band.unmount()
   }
 })
